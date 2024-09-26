@@ -1,0 +1,19 @@
+version: "3.9"
+
+volumes:
+  debugfs:
+    driver: local
+    driver_opts:
+      type: debugfs
+      device: debugfs
+      o: uid=0,gid=0,mode=755
+
+services:
+  runtime-detector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - debugfs:/sys/kernel/debug
+    privileged: true
+    pid: "host"
