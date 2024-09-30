@@ -53,6 +53,7 @@ type bpfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
+	TracepointSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 }
 
@@ -95,11 +96,13 @@ func (m *bpfMaps) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
+	TracepointSchedSchedProcessExit  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
+		p.TracepointSchedSchedProcessExit,
 		p.TracepointSyscallsSysEnterExecve,
 	)
 }

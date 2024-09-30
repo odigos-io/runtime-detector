@@ -1,0 +1,9 @@
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes:
+  - role: control-plane
+    extraMounts:
+    # Kind is running inside a container - hence the /proc filesystem will not be the same as the host's
+    # creating this mount allows our runtime-detector container to access the host's /proc filesystem
+    - hostPath: /proc
+      containerPath: /procHost

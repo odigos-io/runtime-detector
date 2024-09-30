@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+	activeprocesses "github.com/odigos-io/runtime-detector/internal/active_processes"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
@@ -20,6 +22,30 @@ type Probe struct {
 	bpfObjects *bpfObjects
 	links      []link.Link
 	reader     *perf.Reader
+}
+
+type eventType uint32
+
+const (
+	undefined eventType = iota
+	exec
+	exit
+)
+
+func (et eventType) String() string {
+	switch et {
+	case exec:
+		return "exec"
+	case exit:
+		return "exit"
+	default:
+		return "undefined"
+	}
+}
+
+type processEvent struct {
+	Type eventType
+	Pid uint32
 }
 
 const (
@@ -39,7 +65,17 @@ func (p *Probe) Load() error {
 	}
 
 	objs := &bpfObjects{}
-	if err := loadBpfObjects(objs, nil); err != nil {
+	// TODO: collect verifier logs only when configured to.
+	if err := loadBpfObjects(objs, &ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			LogLevel: ebpf.LogLevelInstruction | ebpf.LogLevelStats,
+			LogDisabled: false,
+		},
+	}); err != nil {
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			fmt.Printf("Verifier log: %-100v\n", ve)
+		}
 		return err
 	}
 
@@ -65,6 +101,12 @@ func (p *Probe) Attach() error {
 	}
 	p.links = append(p.links, l)
 
+	l, err = link.Tracepoint("sched", "sched_process_exit", p.bpfObjects.TracepointSchedSchedProcessExit, nil)
+	if err != nil {
+		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
+	}
+	p.links = append(p.links, l)
+
 	return nil
 }
 
@@ -77,12 +119,34 @@ func (p *Probe) Close() error {
 		}
 	}
 
-	err = errors.Join(err, p.bpfObjects.Close())
+	if p.bpfObjects != nil {
+		err = errors.Join(err, p.bpfObjects.Close())
+	}
+
+	if p.reader != nil {
+		err = errors.Join(err, p.reader.Close())
+	}
 
 	return err
 }
 
+func parseProcessEventInto(record *perf.Record, event *processEvent) error {
+	if len(record.RawSample) < 8 {
+		return errors.New("record.RawSample is too short")
+	}
+
+	event.Type = eventType(binary.NativeEndian.Uint32(record.RawSample[0:4]))
+	event.Pid = binary.NativeEndian.Uint32(record.RawSample[4:8])
+
+	return nil
+}
+
 func (p *Probe) Run(ctx context.Context) {
+	var record perf.Record
+	var event processEvent
+
+	ap := activeprocesses.New(p.logger)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,7 +154,7 @@ func (p *Probe) Run(ctx context.Context) {
 			p.reader.Close()
 			return
 		default:
-			record, err := p.reader.Read()
+			err := p.reader.ReadInto(&record)
 			if err != nil {
 				if errors.Is(err, perf.ErrClosed) {
 					p.logger.Info("perf reader closed, no more notifications will be received")
@@ -103,13 +167,25 @@ func (p *Probe) Run(ctx context.Context) {
 				p.logger.Error("lost samples", "count", record.LostSamples)
 			}
 			
-			if len(record.RawSample) < 4 {
+			if len(record.RawSample) < 8 {
 				p.logger.Error("record.RawSample is too short", "length", len(record.RawSample))
 				continue
 			}
 
-			pid := binary.NativeEndian.Uint32(record.RawSample)
-			p.logger.Info("execve", "pid", pid)
+			err = parseProcessEventInto(&record, &event)
+			if err != nil {
+				p.logger.Error("failed to parse event", "error", err)
+				continue
+			}
+
+			switch event.Type {
+			case exec:
+				ap.Add(int(event.Pid))
+			case exit:
+				ap.Remove(int(event.Pid))
+			default:
+				p.logger.Error("unknown event type", "type", event.Type)
+			}
 		}
 	}
 }
