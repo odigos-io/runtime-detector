@@ -6,8 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	"github.com/odigos-io/runtime-detector/internal/probe"
+	detector "github.com/odigos-io/runtime-detector"
 )
 
 func newLogger() *slog.Logger {
@@ -19,28 +20,8 @@ func newLogger() *slog.Logger {
 
 func main() {
 	l := newLogger()
-	p := probe.New(l)
-
-	defer func() {
-		err := p.Close()
-		if err != nil {
-			l.Error("failed to close probe", "error", err)
-		}
-	}()
-
-	err := p.Load()
-	if err != nil {
-		l.Error("failed to load probe", "error", err)
-		return
-	}
-
-	err = p.Attach()
-	if err != nil {
-		l.Error("failed to attach probe", "error", err)
-		return
-	}
-
-	l.Info("probe attached")
+	d := detector.NewDetector(l, time.Second)
+	defer d.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan os.Signal, 1)
@@ -57,7 +38,7 @@ func main() {
 		}
 	}()
 
-	go p.Run(ctx)
+	go d.Run(ctx)
 
 	<-ctx.Done()
 }

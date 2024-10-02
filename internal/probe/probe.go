@@ -12,7 +12,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
-	activeprocesses "github.com/odigos-io/runtime-detector/internal/active_processes"
+	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
@@ -22,6 +22,9 @@ type Probe struct {
 	bpfObjects *bpfObjects
 	links      []link.Link
 	reader     *perf.Reader
+
+	// the consumer of process events supplied by the probe
+	consumer   filter.ProcessesFilter
 }
 
 type eventType uint32
@@ -45,16 +48,17 @@ func (et eventType) String() string {
 
 type processEvent struct {
 	Type eventType
-	Pid uint32
+	Pid  uint32
 }
 
 const (
 	PerfBufferDefaultSizeInPages = 128
 )
 
-func New(logger *slog.Logger) *Probe {
+func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
 	return &Probe{
 		logger: logger,
+		consumer:  f,
 	}
 }
 
@@ -68,7 +72,7 @@ func (p *Probe) Load() error {
 	// TODO: collect verifier logs only when configured to.
 	if err := loadBpfObjects(objs, &ebpf.CollectionOptions{
 		Programs: ebpf.ProgramOptions{
-			LogLevel: ebpf.LogLevelInstruction | ebpf.LogLevelStats,
+			LogLevel:    ebpf.LogLevelInstruction | ebpf.LogLevelStats,
 			LogDisabled: false,
 		},
 	}); err != nil {
@@ -89,7 +93,7 @@ func (p *Probe) Attach() error {
 		return fmt.Errorf("can't attach probe: bpf objects are not loaded")
 	}
 
-	reader, err := perf.NewReader(p.bpfObjects.Events, PerfBufferDefaultSizeInPages * os.Getpagesize())
+	reader, err := perf.NewReader(p.bpfObjects.Events, PerfBufferDefaultSizeInPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("can't create perf reader: %w", err)
 	}
@@ -110,7 +114,7 @@ func (p *Probe) Attach() error {
 	return nil
 }
 
-func (p *Probe) Close() error {
+func (p *Probe) close() error {
 	var err error
 
 	for _, l := range p.links {
@@ -127,6 +131,10 @@ func (p *Probe) Close() error {
 		err = errors.Join(err, p.reader.Close())
 	}
 
+	if p.consumer != nil {
+		err = errors.Join(err, p.consumer.Close())
+	}
+
 	return err
 }
 
@@ -141,24 +149,22 @@ func parseProcessEventInto(record *perf.Record, event *processEvent) error {
 	return nil
 }
 
-func (p *Probe) Run(ctx context.Context) {
+func (p *Probe) Run(ctx context.Context) error {
 	var record perf.Record
 	var event processEvent
 
-	ap := activeprocesses.New(p.logger)
-
+LOOP:
 	for {
 		select {
 		case <-ctx.Done():
 			p.logger.Info("context cancelled, stopping probe")
-			p.reader.Close()
-			return
+			break LOOP
 		default:
 			err := p.reader.ReadInto(&record)
 			if err != nil {
 				if errors.Is(err, perf.ErrClosed) {
 					p.logger.Info("perf reader closed, no more notifications will be received")
-					return
+					break LOOP
 				}
 				p.logger.Error("failed to read record", "error", err)
 			}
@@ -166,7 +172,7 @@ func (p *Probe) Run(ctx context.Context) {
 			if record.LostSamples != 0 {
 				p.logger.Error("lost samples", "count", record.LostSamples)
 			}
-			
+
 			if len(record.RawSample) < 8 {
 				p.logger.Error("record.RawSample is too short", "length", len(record.RawSample))
 				continue
@@ -180,13 +186,14 @@ func (p *Probe) Run(ctx context.Context) {
 
 			switch event.Type {
 			case exec:
-				ap.Add(int(event.Pid))
+				p.consumer.Add(int(event.Pid))
 			case exit:
-				ap.Remove(int(event.Pid))
+				p.consumer.Remove(int(event.Pid))
 			default:
 				p.logger.Error("unknown event type", "type", event.Type)
 			}
 		}
 	}
-}
 
+	return p.close()
+}
