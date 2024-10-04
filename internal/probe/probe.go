@@ -24,7 +24,7 @@ type Probe struct {
 	reader     *perf.Reader
 
 	// the consumer of process events supplied by the probe
-	consumer   filter.ProcessesFilter
+	consumer filter.ProcessesFilter
 }
 
 type eventType uint32
@@ -57,12 +57,24 @@ const (
 
 func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
 	return &Probe{
-		logger: logger,
-		consumer:  f,
+		logger:   logger,
+		consumer: f,
 	}
 }
 
-func (p *Probe) Load() error {
+func (p *Probe) LoadAndAttach() error {
+	if err := p.load(); err != nil {
+		return fmt.Errorf("can't load probe: %w", err)
+	}
+
+	if err := p.attach(); err != nil {
+		return fmt.Errorf("can't attach probe: %w", err)
+	}
+
+	return nil
+}
+
+func (p *Probe) load() error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
@@ -88,7 +100,7 @@ func (p *Probe) Load() error {
 	return nil
 }
 
-func (p *Probe) Attach() error {
+func (p *Probe) attach() error {
 	if p.bpfObjects == nil {
 		return fmt.Errorf("can't attach probe: bpf objects are not loaded")
 	}
@@ -149,7 +161,7 @@ func parseProcessEventInto(record *perf.Record, event *processEvent) error {
 	return nil
 }
 
-func (p *Probe) Run(ctx context.Context) error {
+func (p *Probe) ReadEvents(ctx context.Context) error {
 	var record perf.Record
 	var event processEvent
 

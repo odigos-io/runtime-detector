@@ -34,6 +34,10 @@ spec:
         # this environment variable is used to tell the runtime-detector container where to find the host's /proc filesystem
         - name: PROC_FS_PATH
           value: "/procHost"
+        # used as a dummy HTTP server to test the runtime-detector configuration
+        ports:
+        - containerPort: 8080
+          protocol: TCP
       dnsPolicy: ClusterFirst
       hostPID: true
       restartPolicy: Always

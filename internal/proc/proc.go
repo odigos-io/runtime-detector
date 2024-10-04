@@ -14,8 +14,13 @@ var (
 	ErrorNotK8sProcess = fmt.Errorf("pod UID and container name not found, not a k8s process")
 )
 
-func SetProcFS(path string) {
+func SetProcFS(path string) error {
+	_, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to set proc filesystem ti %s: %w", path, err)
+	}
 	procFS = path
+	return nil
 }
 
 // GetCmdline returns the command line of the process with the given PID.
