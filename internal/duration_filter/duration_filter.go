@@ -13,7 +13,7 @@ type process struct {
 }
 
 type durationFilter struct {
-	rwLock       sync.RWMutex
+	mu           sync.Mutex
 	procs        map[int]*process
 	logger       *slog.Logger
 	liveDuration time.Duration
@@ -22,18 +22,12 @@ type durationFilter struct {
 }
 
 func NewDurationFilter(logger *slog.Logger, d time.Duration, consumer filter.ProcessesFilter) filter.ProcessesFilter {
-	df := &durationFilter{
+	return &durationFilter{
 		procs:        make(map[int]*process),
 		logger:       logger,
 		liveDuration: d,
 		consumer:     consumer,
 	}
-	// set the feedback connection, the consumer can notify this filter about the removal of a pid
-	// TODO: if we decide that this filter removes an entry once it passes it to the consumer, we should remove this
-	if f, ok := df.consumer.(filter.FeedBackProcessesFilter); ok {
-		f.SetProducer(df)
-	}
-	return df
 }
 
 func (df *durationFilter) launchProcessCountdown(pid int) *process {
@@ -42,14 +36,17 @@ func (df *durationFilter) launchProcessCountdown(pid int) *process {
 			df.logger.Debug("process has been active for the specified duration", "pid", pid)
 			// add the pid to the consumer
 			df.consumer.Add(pid)
-			// TODO: should we remove the PID from the duration filter here?
+			// stop tracking the pid
+			df.mu.Lock()
+			delete(df.procs, pid)
+			df.mu.Unlock()
 		}),
 	}
 }
 
 func (df *durationFilter) Add(pid int) {
-	df.rwLock.Lock()
-	defer df.rwLock.Unlock()
+	df.mu.Lock()
+	defer df.mu.Unlock()
 
 	if df.closed {
 		df.logger.Info("cannot add pid, the duration filter has been closed")
@@ -68,8 +65,8 @@ func (df *durationFilter) Add(pid int) {
 }
 
 func (df *durationFilter) Remove(pid int) {
-	df.rwLock.Lock()
-	defer df.rwLock.Unlock()
+	df.mu.Lock()
+	defer df.mu.Unlock()
 
 	if p, ok := df.procs[pid]; ok {
 		p.t.Stop()
@@ -79,8 +76,8 @@ func (df *durationFilter) Remove(pid int) {
 }
 
 func (df *durationFilter) Close() error {
-	df.rwLock.Lock()
-	defer df.rwLock.Unlock()
+	df.mu.Lock()
+	defer df.mu.Unlock()
 
 	for pid, p := range df.procs {
 		p.t.Stop()

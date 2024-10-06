@@ -19,7 +19,6 @@ func TestRemove(t *testing.T) {
 	filter := &k8sProcessesFilter{
 		l:        slog.Default(),
 		m:        m,
-		producer: nil,
 	}
 
 	// Add some PIDs
@@ -97,7 +96,6 @@ func TestTrackPodContainers(t *testing.T) {
 	filter := &k8sProcessesFilter{
 		l:                     slog.Default(),
 		m:                     m,
-		producer:              nil,
 		consumer:              dummyConsumer,
 		relevantPodContainers: make(map[podContainerKey]struct{}),
 	}

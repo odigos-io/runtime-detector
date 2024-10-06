@@ -14,8 +14,3 @@ type ProcessesFilter interface {
 	// When filters are chained, each filter should call Close on the next filter in the chain.
 	Close() error
 }
-
-type FeedBackProcessesFilter interface {
-	ProcessesFilter
-	SetProducer(producer ProcessesFilter)
-}

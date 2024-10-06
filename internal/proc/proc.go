@@ -2,6 +2,7 @@ package proc
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 var (
 	procFS = "/proc"
 	ErrorNotK8sProcess = fmt.Errorf("pod UID and container name not found, not a k8s process")
+	ErrorProcessNotFound = fmt.Errorf("process not found")
 )
 
 func SetProcFS(path string) error {
@@ -29,7 +31,10 @@ func GetCmdline(pid int) (string, error) {
 
 	res, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		if errors.Is(err, os.ErrNotExist) {
+			return "", ErrorProcessNotFound
+		}
+		return "", fmt.Errorf("failed to read cmdline for pid %d: %w", pid, err)
 	}
 
 	return getCleanCmdLine(res), nil

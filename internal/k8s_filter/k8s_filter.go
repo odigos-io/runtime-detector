@@ -10,7 +10,9 @@ import (
 )
 
 var (
+	// excludedCmds are the commands that we do not want to track
 	excludedCmds = []string{
+		// it is common for the kubelet/container-runtime to run a process with the command "/pause",
 		"/pause",
 	}
 
@@ -39,9 +41,6 @@ type k8sProcessesMap struct {
 type k8sProcessesFilter struct {
 	l *slog.Logger
 	m *k8sProcessesMap
-	// the producer which feeds the k8s filter with process events,
-	// we can notify the producer about processes which are not related to k8s
-	producer              filter.ProcessesFilter
 
 	podContainersMu	      sync.RWMutex
 	relevantPodContainers map[podContainerKey]struct{}
@@ -125,21 +124,16 @@ func excludedCmd(cmd string) bool {
 	return false
 }
 
-func (k *k8sProcessesFilter) notifyProducerAboutUnrelaventProcess(pid int) {
-	if k.producer != nil {
-		k.producer.Remove(pid)
-	}
-}
-
 func (k *k8sProcessesFilter) notifyConsumerAboutRelevantProcess(pid int, podContainer podContainerKey) {
 	if k.consumer == nil {
 		return
 	}
 
 	k.podContainersMu.RLock()
-	defer k.podContainersMu.RUnlock()
+	_, exits := k.relevantPodContainers[podContainer]
+	k.podContainersMu.RUnlock()
 
-	if _, ok := k.relevantPodContainers[podContainer]; ok {
+	if exits {
 		k.consumer.Add(pid)
 	}
 }
@@ -147,12 +141,14 @@ func (k *k8sProcessesFilter) notifyConsumerAboutRelevantProcess(pid int, podCont
 func (k *k8sProcessesFilter) Add(pid int) {
 	cmd, err := GetCmdlineFunc(pid)
 	if err != nil {
-		k.l.Error("failed to get cmdline", "pid", pid, "error", err)
+		// log an error only if the error is not about not found process
+		if !errors.Is(err, proc.ErrorProcessNotFound) {
+			k.l.Error("failed to get cmdline", "pid", pid, "error", err)
+		}
 		return
 	}
 
 	if excludedCmd(cmd) {
-		k.notifyProducerAboutUnrelaventProcess(pid)
 		return
 	}
 
@@ -172,8 +168,6 @@ func (k *k8sProcessesFilter) Add(pid int) {
 		if !errors.Is(err, proc.ErrorNotK8sProcess) {
 			k.l.Error("failed to get podID and containerName", "pid", pid, "error", err)
 		}
-		// we could not determine the podID and containerName for this pid, we tell the producer to not track it
-		k.notifyProducerAboutUnrelaventProcess(pid)
 		return
 	}
 
@@ -190,6 +184,9 @@ func (k *k8sProcessesFilter) Add(pid int) {
 
 func (k *k8sProcessesFilter) Close() error {
 	k.l.Info("k8s filter closed")
+	if k.consumer != nil {
+		return k.consumer.Close()
+	}
 	return nil
 }
 
@@ -204,12 +201,6 @@ func (k *k8sProcessesFilter) Remove(pid int) {
 	if k.consumer != nil {
 		k.consumer.Remove(pid)
 	}
-}
-
-var _ filter.FeedBackProcessesFilter = &k8sProcessesFilter{}
-
-func (k *k8sProcessesFilter) SetProducer(p filter.ProcessesFilter) {
-	k.producer = p
 }
 
 func (k *k8sProcessesFilter) TrackPodContainers(podID string, containerNames ...string) {

@@ -3,6 +3,8 @@ package proc
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetPodIDContainerNameFromReader(t *testing.T) {
@@ -104,4 +106,9 @@ func TestGetCleanCmdLine(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetCmdlineNoExists(t *testing.T) {
+	_, err := GetCmdline(999999999)
+	assert.ErrorIs(t, err, ErrorProcessNotFound)
 }
