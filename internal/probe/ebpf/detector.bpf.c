@@ -19,8 +19,52 @@ typedef struct process_event {
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
+const char odigos_env_prefix[] =  "ODIGOS_";
+#define ODIGOS_PREFIX_LEN         (7)
+
+#define MAX_ENV_VARS              (128)
+
+static __always_inline bool is_odigos_env_prefix(char *env) {
+    // don't compare the null terminator
+    for (int i=0; i < ODIGOS_PREFIX_LEN; i++) {
+        if (env[i] != odigos_env_prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 SEC("tracepoint/syscalls/sys_enter_execve")
 int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
+    const char **args = (const char **)(ctx->args[2]);
+    const char *argp;
+    // save space for a terminating null byte
+    char buf[ODIGOS_PREFIX_LEN + 1] = {0};
+    long ret;
+    bool found_relevant = false;
+
+    #pragma unroll
+	for (int i = 1; i < MAX_ENV_VARS; i++) {
+		ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
+		if (ret < 0) {
+			return 0;
+        }
+
+		ret = bpf_probe_read_user_str(&buf[0], sizeof(buf), argp);
+		if (ret < 0) {
+			return 0;
+        }
+
+        if (is_odigos_env_prefix(&buf[0])) {
+            found_relevant = true;
+            break;
+        }
+	}
+
+    if (!found_relevant) {
+        return 0;
+    }
+
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 tgid = pid_tgid >> 32;
 

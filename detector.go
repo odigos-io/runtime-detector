@@ -10,7 +10,6 @@ import (
 
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
 	k8sfilter "github.com/odigos-io/runtime-detector/internal/k8s_filter"
-	"github.com/odigos-io/runtime-detector/internal/lang"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
@@ -22,16 +21,26 @@ type Detector struct {
 	p       *probe.Probe
 	filters []filter.ProcessesFilter
 	l       *slog.Logger
-	k8s     k8sfilter.K8sFilter
+	pids    chan int
+	output	chan <- *Details
+	envKeys map[string]struct{}
 
 	stopMu  sync.Mutex
 	stop    context.CancelFunc
 	stopped chan struct{}
 }
 
+type Details struct {
+	ProcessID    int
+	ExeName      string
+	CmdLine      string
+	Environments map[string]string
+}
+
 type detectorConfig struct {
 	logger *slog.Logger
 	minDuration time.Duration
+	envs map[string]struct{}
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -41,17 +50,21 @@ type DetectorOption interface {
 
 type fnOpt func(context.Context, detectorConfig) (detectorConfig, error)
 
-
 func (o fnOpt) apply(ctx context.Context, c detectorConfig) (detectorConfig, error) { return o(ctx, c) }
 
-func NewDetector(ctx context.Context, opts ...DetectorOption) (*Detector, error) {
+func NewDetector(ctx context.Context, output chan <- *Details, opts ...DetectorOption) (*Detector, error) {
+	if output == nil {
+		return nil, errors.New("output channel is nil")
+	}
+
 	c, err := newConfig(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	lang := lang.NewLangFilter(c.logger)
-	k8s := k8sfilter.NewK8sFilter(c.logger, lang)
+	pids := make(chan int)
+
+	k8s := k8sfilter.NewK8sFilter(c.logger, pids)
 	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, k8s)
 	p := probe.New(c.logger, durationFilter)
 
@@ -61,24 +74,42 @@ func NewDetector(ctx context.Context, opts ...DetectorOption) (*Detector, error)
 		p:       p,
 		filters: filters,
 		l:       c.logger,
+		pids:    pids,
+		output:  output,
+		envKeys: c.envs,
 	}
 
-	k8sFilter, ok := k8s.(k8sfilter.K8sFilter)
-	if !ok {
-		return nil, errors.New("k8s filter not set")
-	}
-
-	d.k8s = k8sFilter
 	return d, nil
 }
 
-func (d *Detector) TrackPodContainers(podUID string, containerNames ...string) error {
-	if d.k8s == nil {
-		return errors.New("k8s filter not set")
+func detailsForPID(pid int, envs map[string]struct{}) *Details {
+	cmd, err := proc.GetCmdline(pid)
+	if err != nil {
+		return nil
 	}
 
-	d.k8s.TrackPodContainers(podUID, containerNames...)
-	return nil
+	env, err := proc.GetEnvironmentVars(pid, envs)
+	if err != nil {
+		return nil
+	}
+
+	return &Details{
+		ProcessID:    pid,
+		ExeName:      proc.GetExeName(pid),
+		CmdLine:      cmd,
+		Environments: env,
+	}
+}
+
+func (d *Detector) eventLoop() {
+	for pid := range d.pids {
+		details := detailsForPID(pid, d.envKeys)
+		if details != nil {
+			d.output <- details
+		}
+
+	}
+	d.l.Info("Detector event loop stopped")
 }
 
 func (d *Detector) Run(ctx context.Context) error {
@@ -86,6 +117,13 @@ func (d *Detector) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func () {
+		defer wg.Done()
+		d.eventLoop()
+	}()
 
 	// load and attach the the required eBPF programs
 	err = d.p.LoadAndAttach()
@@ -104,6 +142,7 @@ func (d *Detector) Run(ctx context.Context) error {
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled
 	err = d.p.ReadEvents(ctx)
+	wg.Wait()
 	close(d.stopped)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
@@ -166,6 +205,10 @@ func newConfig(ctx context.Context, opts []DetectorOption) (detectorConfig, erro
 		c.minDuration = defaultMinDuration
 	}
 
+	if c.envs == nil {
+		c.envs = make(map[string]struct{})
+	}
+
 	return c, err
 }
 
@@ -192,5 +235,16 @@ func WithProcFSPath(p string) DetectorOption {
 	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
 		err := proc.SetProcFS(p)
 		return c, err
+	})
+}
+
+func WithEnvironments(envs ...string) DetectorOption {
+	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+		envsMap := make(map[string]struct{})
+		for _, e := range envs {
+			envsMap[e] = struct{}{}
+		}
+		c.envs = envsMap
+		return c, nil
 	})
 }

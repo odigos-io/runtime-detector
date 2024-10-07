@@ -112,3 +112,83 @@ func TestGetCmdlineNoExists(t *testing.T) {
 	_, err := GetCmdline(999999999)
 	assert.ErrorIs(t, err, ErrorProcessNotFound)
 }
+
+func TestParseEnvironments(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		keys          map[string]struct{}
+		expected      map[string]string
+	}{
+		{
+			name:  "Basic valid input",
+			input: "KEY1=value1\x00KEY2=value2\x00KEY3=value3\x00",
+			keys: map[string]struct{}{
+				"KEY1": {},
+				"KEY2": {},
+			},
+			expected: map[string]string{
+				"KEY1": "value1",
+				"KEY2": "value2",
+			},
+		},
+		{
+			name:  "Key not in the map",
+			input: "KEY1=value1\x00KEY2=value2\x00",
+			keys: map[string]struct{}{
+				"KEY3": {},
+			},
+			expected:      map[string]string{},
+		},
+		{
+			name:          "Empty input",
+			input:         "",
+			keys:          map[string]struct{}{},
+			expected:      map[string]string{},
+		},
+		{
+			name: "Val with '='",
+			input: "KEY1=value1\x00KEY2=value2\x00KEY3=value3\x00KEY4=value4=foo\x00",
+			keys: map[string]struct{}{
+				"KEY2": {},
+				"KEY4": {},
+			},
+			expected: map[string]string{
+				"KEY2": "value2",
+				"KEY4": "value4=foo",
+			},
+		},
+		{
+			name: "Empty value",
+			input: "KEY1=\x00KEY2=value2\x00",
+			keys: map[string]struct{}{
+				"KEY1": {},
+				"KEY2": {},
+			},
+			expected: map[string]string{
+				"KEY1": "",
+				"KEY2": "value2",
+			},
+		},
+	}
+
+	compareEnvs := func(t *testing.T, expected, actual map[string]string) {
+		if !assert.Equal(t, len(expected), len(actual)) {
+			return
+		}
+
+		for k, v := range expected {
+			assert.Equal(t, v, actual[k])
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := strings.NewReader(string(tt.input))
+			result, err := parseEnvironments(r, tt.keys)
+			assert.NoError(t, err)
+
+			compareEnvs(t, tt.expected, result)
+		})
+	}
+}
