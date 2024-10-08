@@ -24,7 +24,7 @@ func main() {
 	l := newLogger()
 	opts := []detector.DetectorOption{
 		detector.WithLogger(l),
-		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME"),
+		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME", "ODIGOS_CONTAINER_NAME", "ODIGOS_WORKLOAD_NAMESPACE"),
 	}
 	if p := os.Getenv(envProcFS); p != "" {
 		opts = append(opts, detector.WithProcFSPath(p))

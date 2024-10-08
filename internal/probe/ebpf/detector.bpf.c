@@ -19,8 +19,8 @@ typedef struct process_event {
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
-const char odigos_env_prefix[] =  "ODIGOS_";
-#define ODIGOS_PREFIX_LEN         (7)
+const char odigos_env_prefix[] =  "ODIGOS_POD";
+#define ODIGOS_PREFIX_LEN         (10)
 
 #define MAX_ENV_VARS              (128)
 

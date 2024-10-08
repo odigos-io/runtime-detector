@@ -17,7 +17,7 @@ var (
 )
 
 const (
-	odigosEnvVarKeyPrefix = "ODIGOS_"
+	odigosEnvVarKeyPrefix = "ODIGOS_POD"
 )
 
 func SetProcFS(path string) error {
