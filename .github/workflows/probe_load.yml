@@ -1,0 +1,43 @@
+name: probe_load
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  go_version: '~1.22'
+  CGO_ENABLED: '0'
+
+jobs:
+    vm-test:
+        name: Run tests
+        runs-on: large-runner
+        timeout-minutes: 15
+        strategy:
+          fail-fast: false
+          matrix:
+            tag:
+              - "stable"
+              - "6.6"
+              - "5.15"
+              - "5.10"
+              - "5.4"
+        steps:
+          - uses: actions/checkout@v4
+          - name: Set up Go
+            uses: actions/setup-go@v5
+            with:
+              go-version: '${{ env.go_version }}'
+          - name: make docker-generate
+            run: make docker-generate
+          - name: verify output
+            run: make check-clean-work-tree
+          - name: Install vimto
+            run: go install lmb.io/vimto@latest
+          - name: Install qemu
+            run: |
+                sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-x86
+                sudo chmod 0666 /dev/kvm
+          - name: Test probe loading
+            run: vimto -kernel :${{ matrix.tag }} -- go test -v ./...
