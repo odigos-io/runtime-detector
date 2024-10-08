@@ -38,6 +38,7 @@ func main() {
 				"pid", d.ProcessID,
 				"cmd", d.CmdLine,
 				"exeName", d.ExeName,
+				"exeLink", d.ExeLink,
 				"envs", d.Environments,
 			)
 		}

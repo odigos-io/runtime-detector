@@ -22,7 +22,7 @@ type Detector struct {
 	filters []filter.ProcessesFilter
 	l       *slog.Logger
 	pids    chan int
-	output	chan <- *Details
+	output  chan<- *Details
 	envKeys map[string]struct{}
 
 	stopMu  sync.Mutex
@@ -31,16 +31,24 @@ type Detector struct {
 }
 
 type Details struct {
-	ProcessID    int
-	ExeName      string
-	CmdLine      string
+	// ProcessID is the process ID of the detected process
+	ProcessID int
+	// Name of the executable: (e.g. /usr/bin/bash, /usr/local/bin/node)
+	ExeName string
+	// Symbolic link to the executable, this can be used to read the binary's metadata
+	ExeLink string
+	// Command line used to launch the process, including arguments (e.g. java -jar /app/frontend.jar)
+	CmdLine string
+	// Environment variables set for the process, and the user requested to get their values.
+	// If the detector was configured with a given set of environment keys, only those keys will be returned
+	// with their values. If a given key is not found, it will not be included in the map.
 	Environments map[string]string
 }
 
 type detectorConfig struct {
-	logger *slog.Logger
+	logger      *slog.Logger
 	minDuration time.Duration
-	envs map[string]struct{}
+	envs        map[string]struct{}
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -52,7 +60,7 @@ type fnOpt func(context.Context, detectorConfig) (detectorConfig, error)
 
 func (o fnOpt) apply(ctx context.Context, c detectorConfig) (detectorConfig, error) { return o(ctx, c) }
 
-func NewDetector(ctx context.Context, output chan <- *Details, opts ...DetectorOption) (*Detector, error) {
+func NewDetector(ctx context.Context, output chan<- *Details, opts ...DetectorOption) (*Detector, error) {
 	if output == nil {
 		return nil, errors.New("output channel is nil")
 	}
@@ -93,9 +101,12 @@ func detailsForPID(pid int, envs map[string]struct{}) *Details {
 		return nil
 	}
 
+	link, exeName := proc.GetExeNameAndLink(pid)
+
 	return &Details{
 		ProcessID:    pid,
-		ExeName:      proc.GetExeName(pid),
+		ExeName:      exeName,
+		ExeLink:      link,
 		CmdLine:      cmd,
 		Environments: env,
 	}
@@ -110,6 +121,7 @@ func (d *Detector) eventLoop() {
 
 	}
 	d.l.Info("Detector event loop stopped")
+	close(d.output)
 }
 
 func (d *Detector) Run(ctx context.Context) error {
@@ -120,7 +132,7 @@ func (d *Detector) Run(ctx context.Context) error {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go func () {
+	go func() {
 		defer wg.Done()
 		d.eventLoop()
 	}()
@@ -179,7 +191,7 @@ func (d *Detector) Stop() error {
 func newDefaultLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		AddSource: true,
-		Level:    slog.LevelInfo,
+		Level:     slog.LevelInfo,
 	}))
 }
 
