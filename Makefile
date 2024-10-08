@@ -25,3 +25,12 @@ docker-generate:
 .PHONY: build
 build: generate
 	go build -o runtime-detector ./cmd/...
+
+.PHONY: check-clean-work-tree
+check-clean-work-tree:
+	if [ -n "$$(git status --porcelain)" ]; then \
+		git status; \
+		git --no-pager diff; \
+		echo 'Working tree is not clean, did you forget to run "make precommit", "make generate" or "make offsets"?'; \
+		exit 1; \
+	fi

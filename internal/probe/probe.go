@@ -81,13 +81,8 @@ func (p *Probe) load() error {
 	}
 
 	objs := &bpfObjects{}
-	// TODO: collect verifier logs only when configured to.
-	if err := loadBpfObjects(objs, &ebpf.CollectionOptions{
-		Programs: ebpf.ProgramOptions{
-			LogLevel:    ebpf.LogLevelInstruction | ebpf.LogLevelStats,
-			LogDisabled: false,
-		},
-	}); err != nil {
+	// TODO: collect verifier logs when configured to.
+	if err := loadBpfObjects(objs, &ebpf.CollectionOptions{}); err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
 			fmt.Printf("Verifier log: %-100v\n", ve)
