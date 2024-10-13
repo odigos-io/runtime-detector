@@ -19,10 +19,10 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
 
 type Probe struct {
-	logger     *slog.Logger
-	c 		   *ebpf.Collection
-	links      []link.Link
-	reader     *perf.Reader
+	logger *slog.Logger
+	c      *ebpf.Collection
+	links  []link.Link
+	reader *perf.Reader
 
 	// the consumer of process events supplied by the probe
 	consumer filter.ProcessesFilter
@@ -55,7 +55,7 @@ type processEvent struct {
 const (
 	PerfBufferDefaultSizeInPages = 128
 
-	eventsMapName = "events"
+	eventsMapName          = "events"
 	processExecProgramName = "tracepoint__syscalls__sys_enter_execve"
 	processExitProgramName = "tracepoint__sched__sched_process_exit"
 )
