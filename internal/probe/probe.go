@@ -12,16 +12,17 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/odigos-io/runtime-detector/internal/proc"
 	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
 
 type Probe struct {
-	logger     *slog.Logger
-	bpfObjects *bpfObjects
-	links      []link.Link
-	reader     *perf.Reader
+	logger *slog.Logger
+	c      *ebpf.Collection
+	links  []link.Link
+	reader *perf.Reader
 
 	// the consumer of process events supplied by the probe
 	consumer filter.ProcessesFilter
@@ -53,6 +54,10 @@ type processEvent struct {
 
 const (
 	PerfBufferDefaultSizeInPages = 128
+
+	eventsMapName          = "events"
+	processExecProgramName = "tracepoint__syscalls__sys_enter_execve"
+	processExitProgramName = "tracepoint__sched__sched_process_exit"
 )
 
 func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
@@ -63,7 +68,13 @@ func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
 }
 
 func (p *Probe) LoadAndAttach() error {
-	if err := p.load(); err != nil {
+	// find the PID namespace inode
+	pidNS, err := proc.GetCurrentPIDNameSpaceIndoe()
+	if err != nil {
+		return fmt.Errorf("can't get current PID namespace inode: %w", err)
+	}
+
+	if err := p.load(pidNS); err != nil {
 		return fmt.Errorf("can't load probe: %w", err)
 	}
 
@@ -74,45 +85,54 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
-func (p *Probe) load() error {
+func (p *Probe) load(ns uint32) error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return err
 	}
 
-	objs := &bpfObjects{}
-	// TODO: collect verifier logs when configured to.
-	if err := loadBpfObjects(objs, &ebpf.CollectionOptions{}); err != nil {
+	spec, err := loadBpf()
+	if err != nil {
+		return err
+	}
+
+	err = spec.RewriteConstants(map[string]interface{}{
+		"pid_ns_inode": ns,
+	})
+	if err != nil {
+		return fmt.Errorf("can't rewrite constants: %w", err)
+	}
+
+	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
+	if err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
 			fmt.Printf("Verifier log: %-100v\n", ve)
 		}
-		return err
 	}
 
-	p.bpfObjects = objs
-
+	p.c = c
 	return nil
 }
 
 func (p *Probe) attach() error {
-	if p.bpfObjects == nil {
-		return fmt.Errorf("can't attach probe: bpf objects are not loaded")
+	if p.c == nil {
+		return errors.New("no eBPF collection loaded")
 	}
 
-	reader, err := perf.NewReader(p.bpfObjects.Events, PerfBufferDefaultSizeInPages*os.Getpagesize())
+	reader, err := perf.NewReader(p.c.Maps[eventsMapName], PerfBufferDefaultSizeInPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("can't create perf reader: %w", err)
 	}
 	p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.bpfObjects.TracepointSyscallsSysEnterExecve, nil)
+	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[processExecProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
 	}
 	p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("sched", "sched_process_exit", p.bpfObjects.TracepointSchedSchedProcessExit, nil)
+	l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
 	}
@@ -130,8 +150,8 @@ func (p *Probe) close() error {
 		}
 	}
 
-	if p.bpfObjects != nil {
-		err = errors.Join(err, p.bpfObjects.Close())
+	if p.c != nil {
+		p.c.Close()
 	}
 
 	if p.reader != nil {

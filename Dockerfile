@@ -7,8 +7,9 @@ RUN --mount=type=cache,target=/go/pkg \
     go mod download && go mod verify
 
 COPY . .
+ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-    make build
+    GOOS=linux GOARCH=$TARGETARCH make build
 
 CMD [ "/app/runtime-detector" ]

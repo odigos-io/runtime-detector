@@ -20,17 +20,34 @@ const (
 	odigosEnvVarKeyPrefix = "ODIGOS_POD"
 )
 
-func SetProcFS(path string) error {
-	_, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to set proc filesystem ti %s: %w", path, err)
-	}
-	procFS = path
-	return nil
-}
-
 func procFile(pid int, filename string) string {
 	return fmt.Sprintf("%s/%d/%s", procFS, pid, filename)
+}
+
+func GetCurrentPIDNameSpaceIndoe() (uint32, error) {
+	// look at the pid namespace of the root process
+	path := procFile(1, "ns/pid")
+	content, err := os.Readlink(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read link %s: %w", path, err)
+	}
+
+	return extractNSInode(content)
+}
+
+func extractNSInode(content string) (uint32, error) {
+	parts := strings.Split(content, "[")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("unexpected content %s", content)
+	}
+
+	inodeStr := strings.TrimRight(parts[1], "]")
+	inode, err := strconv.ParseUint(inodeStr, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse inode %s: %w", inodeStr, err)
+	}
+
+	return uint32(inode), nil
 }
 
 // GetCmdline returns the command line of the process with the given PID.

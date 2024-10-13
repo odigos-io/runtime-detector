@@ -16,8 +16,8 @@ spec:
         app: runtime-detect
     spec:
       containers:
-      - image: dev/runtime-detector:test
-        imagePullPolicy: IfNotPresent
+      - image: public.ecr.aws/y2v0v6s7/dev/runtime-detector:test
+        imagePullPolicy: Always
         name: runtime-detector
         resources: {}
         securityContext:
@@ -27,17 +27,6 @@ spec:
         volumeMounts:
         - mountPath: /sys/kernel/debug
           name: kernel-debug
-        - mountPath: /procHost
-          name: host-proc
-        env:
-        # when deploying in a kind cluster, the /proc filesystem is not the same as the host's
-        # this environment variable is used to tell the runtime-detector container where to find the host's /proc filesystem
-        - name: PROC_FS_PATH
-          value: "/procHost"
-        # used as a dummy HTTP server to test the runtime-detector configuration
-        ports:
-        - containerPort: 8080
-          protocol: TCP
       dnsPolicy: ClusterFirst
       hostPID: true
       restartPolicy: Always
@@ -49,7 +38,3 @@ spec:
         hostPath:
           path: /sys/kernel/debug
           type: ""
-      - name: host-proc
-        hostPath:
-          path: /procHost
-          type: Directory

@@ -12,7 +12,7 @@ func TestLoad(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	err := p.load()
+	err := p.load(uint32(4026532561))
 	defer p.close()
 	assert.NoError(t, err)
 }
