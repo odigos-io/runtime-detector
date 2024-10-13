@@ -192,3 +192,13 @@ func TestParseEnvironments(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractNSInode(t *testing.T) {
+	inode, err := extractNSInode("pid:[4026531835]")
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(4026531835), inode)
+
+	inode, err = extractNSInode("pid:[12]")
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(12), inode)
+}

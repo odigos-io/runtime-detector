@@ -10,8 +10,6 @@ import (
 	detector "github.com/odigos-io/runtime-detector"
 )
 
-const envProcFS = "PROC_FS_PATH"
-
 func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		AddSource: true,
@@ -25,9 +23,6 @@ func main() {
 	opts := []detector.DetectorOption{
 		detector.WithLogger(l),
 		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME", "ODIGOS_CONTAINER_NAME", "ODIGOS_WORKLOAD_NAMESPACE"),
-	}
-	if p := os.Getenv(envProcFS); p != "" {
-		opts = append(opts, detector.WithProcFSPath(p))
 	}
 
 	details := make(chan *detector.Details)

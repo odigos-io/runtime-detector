@@ -72,6 +72,10 @@ func NewDetector(ctx context.Context, output chan<- *Details, opts ...DetectorOp
 
 	pids := make(chan int)
 
+	// the following steps are used to create the filters chain
+	// 1. ebpf probe generating events and doing basic filtering
+	// 2. duration filter to filter out short-lived processes
+	// 3. k8s filter to check if the process is running in a k8s pod
 	k8s := k8sfilter.NewK8sFilter(c.logger, pids)
 	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, k8s)
 	p := probe.New(c.logger, durationFilter)
@@ -130,6 +134,7 @@ func (d *Detector) Run(ctx context.Context) error {
 		return err
 	}
 
+	// read pid events from the filters chain and pass them to the client
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -240,16 +245,9 @@ func WithMinDuration(d time.Duration) DetectorOption {
 	})
 }
 
-// WithProcFSPath returns a [DetectorOption] that configures a [Detector] to use the specified path to the 'proc' filesystem,
-// the default is /proc. In some cases, the 'proc' filesystem is mounted in a different location.
-// For example when using Kind, the 'proc' filesystem is that of the container running kind.
-func WithProcFSPath(p string) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
-		err := proc.SetProcFS(p)
-		return c, err
-	})
-}
-
+// WithEnvironments returns a [DetectorOption] that configures a [Detector] to include the specified environment
+// variables in the output (in case they are set for the process). If no environment keys are provided, no environment
+// variables will be included in the output.
 func WithEnvironments(envs ...string) DetectorOption {
 	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
 		envsMap := make(map[string]struct{})
