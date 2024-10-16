@@ -1,4 +1,4 @@
-package processfilter
+package common
 
 // ProcessesFilter filters processes based on some specific logic.
 // Multiple filters can be chained together, each receiving the output of the previous filter.

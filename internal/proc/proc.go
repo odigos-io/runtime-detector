@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	procFS = "/proc"
-	ErrorNotK8sProcess = fmt.Errorf("pod UID and container name not found, not a k8s process")
+	procFS               = "/proc"
+	ErrorNotK8sProcess   = fmt.Errorf("pod UID and container name not found, not a k8s process")
 	ErrorProcessNotFound = fmt.Errorf("process not found")
 )
 
@@ -134,10 +134,10 @@ func isProcessRelevantToOdigos(pid int) bool {
 	}
 
 	// don't fully pares the environment, just check if it contains the ODIGOS_ prefix
-	return strings.Contains(string(fileContent), odigosEnvVarKeyPrefix)	
+	return strings.Contains(string(fileContent), odigosEnvVarKeyPrefix)
 }
 
-func AllProcesses() ([]int, error) {
+func AllRelevantProcesses() ([]int, error) {
 	d, err := os.Open(procFS)
 	if err != nil {
 		return nil, err
