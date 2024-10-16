@@ -43,6 +43,8 @@ type Details struct {
 	// If the detector was configured with a given set of environment keys, only those keys will be returned
 	// with their values. If a given key is not found, it will not be included in the map.
 	Environments map[string]string
+	// the PID of the process in the container namespace, if the process is running in a container.
+	ContainerProcessID int
 }
 
 type detectorConfig struct {
@@ -94,31 +96,37 @@ func NewDetector(ctx context.Context, output chan<- *Details, opts ...DetectorOp
 	return d, nil
 }
 
-func detailsForPID(pid int, envs map[string]struct{}) *Details {
+func (d *Detector) detailsForPID(pid int) *Details {
 	cmd, err := proc.GetCmdline(pid)
 	if err != nil {
 		return nil
 	}
 
-	env, err := proc.GetEnvironmentVars(pid, envs)
+	env, err := proc.GetEnvironmentVars(pid, d.envKeys)
 	if err != nil {
 		return nil
 	}
 
 	link, exeName := proc.GetExeNameAndLink(pid)
 
+	cPID, err := d.p.GetContainerPID(pid)
+	if err != nil {
+		d.l.Error("failed to get container PID", "pid", pid, "error", err)
+	}
+
 	return &Details{
-		ProcessID:    pid,
-		ExeName:      exeName,
-		ExeLink:      link,
-		CmdLine:      cmd,
-		Environments: env,
+		ProcessID:          pid,
+		ExeName:            exeName,
+		ExeLink:            link,
+		CmdLine:            cmd,
+		Environments:       env,
+		ContainerProcessID: cPID,
 	}
 }
 
 func (d *Detector) eventLoop() {
 	for pid := range d.pids {
-		details := detailsForPID(pid, d.envKeys)
+		details := d.detailsForPID(pid)
 		if details != nil {
 			d.output <- details
 		}

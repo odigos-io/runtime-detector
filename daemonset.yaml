@@ -16,8 +16,9 @@ spec:
         app: runtime-detect
     spec:
       containers:
-      - image: public.ecr.aws/y2v0v6s7/dev/runtime-detector:test
-        imagePullPolicy: Always
+      - image: dev/runtime-detector:test
+      #- image: public.ecr.aws/y2v0v6s7/dev/runtime-detector:test
+      # imagePullPolicy: Always
         name: runtime-detector
         resources: {}
         securityContext:
