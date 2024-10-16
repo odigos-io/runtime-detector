@@ -35,6 +35,7 @@ func main() {
 				"exeName", d.ExeName,
 				"exeLink", d.ExeLink,
 				"envs", d.Environments,
+				"container PID", d.ContainerProcessID,
 			)
 		}
 		close(done)

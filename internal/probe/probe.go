@@ -55,9 +55,10 @@ type processEvent struct {
 const (
 	PerfBufferDefaultSizeInPages = 128
 
-	eventsMapName          = "events"
-	processExecProgramName = "tracepoint__syscalls__sys_enter_execve"
-	processExitProgramName = "tracepoint__sched__sched_process_exit"
+	eventsMapName            = "events"
+	processExecProgramName   = "tracepoint__syscalls__sys_enter_execve"
+	processExitProgramName   = "tracepoint__sched__sched_process_exit"
+	pidToContainerPIDMapName = "user_pid_to_container_pid"
 )
 
 func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
@@ -174,6 +175,17 @@ func parseProcessEventInto(record *perf.Record, event *processEvent) error {
 	event.Pid = binary.NativeEndian.Uint32(record.RawSample[4:8])
 
 	return nil
+}
+
+func (p *Probe) GetContainerPID(pid int) (int, error) {
+	m := p.c.Maps[pidToContainerPIDMapName]
+	var containerPID uint32
+	err := m.Lookup(uint32(pid), &containerPID)
+	if err != nil {
+		return 0, fmt.Errorf("can't lookup container PID: %w", err)
+	}
+
+	return int(containerPID), nil
 }
 
 func (p *Probe) ReadEvents(ctx context.Context) error {

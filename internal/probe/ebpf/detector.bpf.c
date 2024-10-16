@@ -4,6 +4,7 @@
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
+// we use this env var prefix to filter out processes we are not interested in
 const char odigos_env_prefix[] =  "ODIGOS_POD";
 #define ODIGOS_PREFIX_LEN         (10)
 
@@ -21,9 +22,16 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);   // the pid as return from bpf_get_current_pid_tgid()
-	__type(value, u32); // the pid as return from get_pid_for_configured_ns()
+	__type(value, u32); // the pid in the configured namespace (user space is aware of)
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } tracked_pids_to_ns_pids SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, u32);   // the pid in the configured namespace (user space is aware of)
+	__type(value, u32); // the pid in the last level namespace (the container pid)
+	__uint(max_entries, MAX_CONCURRENT_PIDS);
+} user_pid_to_container_pid SEC(".maps");
 
 typedef enum {
     UNDEFINED = 0,
@@ -50,11 +58,19 @@ static __always_inline bool is_odigos_env_prefix(char *env) {
     return true;
 }
 
-static __always_inline u32 get_pid_for_configured_ns(struct task_struct *task) {
+typedef struct pids_in_ns {
+    // the pid in the configured namespace (user space is aware of)
+    u32 configured_ns_pid;
+    // the pid in the last level namespace (the container pid)
+    u32 last_level_pid;
+} pids_in_ns_t;
+
+static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids) {
     struct upid upid =     {0};
     u32 inum =              0;
     u32 selected_pid =      0;
-    unsigned int num_pids = BPF_CORE_READ(task, thread_pid, level);
+    unsigned int level =    BPF_CORE_READ(task, thread_pid, level);
+    unsigned int num_pids = level + 1;
 
     if (num_pids > MAX_NS_FOR_PID) {
         bpf_printk("Number of PIDs is greater than supported: %d", num_pids);
@@ -65,12 +81,15 @@ static __always_inline u32 get_pid_for_configured_ns(struct task_struct *task) {
         upid = BPF_CORE_READ(task, thread_pid, numbers[i]);
         inum = BPF_CORE_READ(upid.ns, ns.inum);
         if (inum == pid_ns_inode) {
-            selected_pid = upid.nr;
+            pids->configured_ns_pid = upid.nr;
             break;
         }
     }
 
-    return selected_pid;
+    upid = BPF_CORE_READ(task, thread_pid, numbers[level]);
+    pids->last_level_pid = upid.nr;
+
+    return 0;
 }
 
 SEC("tracepoint/syscalls/sys_enter_execve")
@@ -112,23 +131,30 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    u32 selected_pid = get_pid_for_configured_ns(task);
-    if (selected_pid == 0) {
+    pids_in_ns_t pids = {0};
+    ret = get_pid_for_configured_ns(task, &pids);
+    if (ret < 0) {
         bpf_printk("Could not find PID for task: 0x%llx", bpf_get_current_pid_tgid());
         return 0;
     }
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
-    ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &selected_pid, BPF_ANY);
+    ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret != 0) {
         bpf_printk("Failed to update PID to NS PID map: %d", ret);
         return 0;
     }
 
+    ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
+    if (ret != 0) {
+        bpf_printk("Failed to update user PID to container PID map: %d", ret);
+        return 0;
+    }
+
     process_event_t event = {
         .type = PROCESS_EXEC,
-        .pid = selected_pid,
+        .pid = pids.configured_ns_pid,
     };
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
@@ -161,5 +187,6 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
     bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
+    bpf_map_delete_elem(&user_pid_to_container_pid, selected_pid);
     return 0;
 }
