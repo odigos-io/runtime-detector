@@ -26,6 +26,11 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } tracked_pids_to_ns_pids SEC(".maps");
 
+// The following map is used to store the mapping between the PID in the configured namespace
+// (which the user is aware of) and the PID in the last level namespace (the container PID).
+// It can be read from user-space.
+// user space can also write to this function in the initialization phase
+// to let the probes know about relevant process which are already running.
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);   // the pid in the configured namespace (user space is aware of)
@@ -46,7 +51,7 @@ typedef struct process_event {
 
 // This is the inode number of the PID namespace we are interested in.
 // It is set by the userspace code.
-volatile const u32 pid_ns_inode = 0;
+volatile const u32 configured_pid_ns_inode = 0;
 
 static __always_inline bool is_odigos_env_prefix(char *env) {
     // don't compare the null terminator
@@ -71,6 +76,7 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
     u32 selected_pid =      0;
     unsigned int level =    BPF_CORE_READ(task, thread_pid, level);
     unsigned int num_pids = level + 1;
+    bool found =            false;
 
     if (num_pids > MAX_NS_FOR_PID) {
         bpf_printk("Number of PIDs is greater than supported: %d", num_pids);
@@ -80,10 +86,15 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
     for (int i = 0; i < num_pids && i < MAX_NS_FOR_PID; i++) {
         upid = BPF_CORE_READ(task, thread_pid, numbers[i]);
         inum = BPF_CORE_READ(upid.ns, ns.inum);
-        if (inum == pid_ns_inode) {
+        if (inum == configured_pid_ns_inode) {
             pids->configured_ns_pid = upid.nr;
+            found = true;
             break;
         }
+    }
+
+    if (!found) {
+        return -1;
     }
 
     upid = BPF_CORE_READ(task, thread_pid, numbers[level]);
@@ -166,6 +177,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 tgid = (u32)(pid_tgid >> 32);
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    long ret = 0;
 
     if (tgid != pid) {
         // Only if the thread group ID matched with the PID the process itself exits. If they don't
@@ -174,19 +186,32 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         return 0;
     }
 
-    // look this pid in the map, avoid sending exit event for PIDs we didn't send exec event for.
+    process_event_t event = { .type = PROCESS_EXIT};
+
+    // look this pid in the map, we will find an entry if this process was found relevant in the exec probe
     u32 *selected_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
     if (selected_pid == NULL) {
-        return 0;
+        // get the pid in the configured namespace
+        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+        pids_in_ns_t pids = {0};
+        ret = get_pid_for_configured_ns(task, &pids);
+        if (ret < 0) {
+            bpf_printk("process exit: Could not find PID for task return code: %ld", ret);
+            return 0;
+        }
+        // find out if this exit event is for a process we are interested in
+        // this can happen if this map was written to by the user space
+        void *found = bpf_map_lookup_elem(&user_pid_to_container_pid, &pids.configured_ns_pid);
+        if (found == NULL) {
+            return 0;
+        }
+        event.pid = pids.configured_ns_pid;
+    } else {
+        event.pid = *selected_pid;
     }
 
-    process_event_t event = {
-        .type = PROCESS_EXIT,
-        .pid = *selected_pid,
-    };
-
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    bpf_map_delete_elem(&user_pid_to_container_pid,  &event.pid);
     bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
-    bpf_map_delete_elem(&user_pid_to_container_pid, selected_pid);
     return 0;
 }

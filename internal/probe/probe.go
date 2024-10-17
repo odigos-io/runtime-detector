@@ -12,8 +12,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+	"github.com/odigos-io/runtime-detector/internal/common"
 	"github.com/odigos-io/runtime-detector/internal/proc"
-	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
@@ -25,30 +25,11 @@ type Probe struct {
 	reader *perf.Reader
 
 	// the consumer of process events supplied by the probe
-	consumer filter.ProcessesFilter
-}
-
-type eventType uint32
-
-const (
-	undefined eventType = iota
-	exec
-	exit
-)
-
-func (et eventType) String() string {
-	switch et {
-	case exec:
-		return "exec"
-	case exit:
-		return "exit"
-	default:
-		return "undefined"
-	}
+	consumer common.ProcessesFilter
 }
 
 type processEvent struct {
-	Type eventType
+	Type common.EventType
 	Pid  uint32
 }
 
@@ -61,7 +42,7 @@ const (
 	pidToContainerPIDMapName = "user_pid_to_container_pid"
 )
 
-func New(logger *slog.Logger, f filter.ProcessesFilter) *Probe {
+func New(logger *slog.Logger, f common.ProcessesFilter) *Probe {
 	return &Probe{
 		logger:   logger,
 		consumer: f,
@@ -98,7 +79,7 @@ func (p *Probe) load(ns uint32) error {
 	}
 
 	err = spec.RewriteConstants(map[string]interface{}{
-		"pid_ns_inode": ns,
+		"configured_pid_ns_inode": ns,
 	})
 	if err != nil {
 		return fmt.Errorf("can't rewrite constants: %w", err)
@@ -142,7 +123,7 @@ func (p *Probe) attach() error {
 	return nil
 }
 
-func (p *Probe) close() error {
+func (p *Probe) Close() error {
 	var err error
 
 	for _, l := range p.links {
@@ -171,7 +152,7 @@ func parseProcessEventInto(record *perf.Record, event *processEvent) error {
 		return errors.New("record.RawSample is too short")
 	}
 
-	event.Type = eventType(binary.NativeEndian.Uint32(record.RawSample[0:4]))
+	event.Type = common.EventType(binary.NativeEndian.Uint32(record.RawSample[0:4]))
 	event.Pid = binary.NativeEndian.Uint32(record.RawSample[4:8])
 
 	return nil
@@ -188,7 +169,20 @@ func (p *Probe) GetContainerPID(pid int) (int, error) {
 	return int(containerPID), nil
 }
 
-func (p *Probe) ReadEvents(ctx context.Context) error {
+func (p *Probe) TrackPIDs(pids []int) error {
+	m := p.c.Maps[pidToContainerPIDMapName]
+	keys := make([]uint32, len(pids))
+	for i, pid := range pids {
+		keys[i] = uint32(pid)
+	}
+	_, err := m.BatchUpdate(keys, make([]uint32, len(pids)), &ebpf.BatchOptions{})
+	if err != nil {
+		return fmt.Errorf("can't batch update PIDs: %w", err)
+	}
+	return nil
+}
+
+func (p *Probe) ReadEvents(ctx context.Context) {
 	var record perf.Record
 	var event processEvent
 
@@ -224,15 +218,13 @@ LOOP:
 			}
 
 			switch event.Type {
-			case exec:
+			case common.EventTypeExec:
 				p.consumer.Add(int(event.Pid))
-			case exit:
+			case common.EventTypeExit:
 				p.consumer.Remove(int(event.Pid))
 			default:
 				p.logger.Error("unknown event type", "type", event.Type)
 			}
 		}
 	}
-
-	return p.close()
 }

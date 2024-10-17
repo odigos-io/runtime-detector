@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
+	"github.com/odigos-io/runtime-detector/internal/common"
 )
 
 type process struct {
@@ -17,11 +17,11 @@ type durationFilter struct {
 	procs        map[int]*process
 	logger       *slog.Logger
 	liveDuration time.Duration
-	consumer     filter.ProcessesFilter
+	consumer     common.ProcessesFilter
 	closed       bool
 }
 
-func NewDurationFilter(logger *slog.Logger, d time.Duration, consumer filter.ProcessesFilter) filter.ProcessesFilter {
+func NewDurationFilter(logger *slog.Logger, d time.Duration, consumer common.ProcessesFilter) common.ProcessesFilter {
 	return &durationFilter{
 		procs:        make(map[int]*process),
 		logger:       logger,
@@ -66,13 +66,22 @@ func (df *durationFilter) Add(pid int) {
 
 func (df *durationFilter) Remove(pid int) {
 	df.mu.Lock()
-	defer df.mu.Unlock()
+	stopped := false
 
 	if p, ok := df.procs[pid]; ok {
-		p.t.Stop()
+		stopped = p.t.Stop()
 		delete(df.procs, pid)
-		df.consumer.Remove(pid)
 	}
+	df.mu.Unlock()
+
+	if stopped {
+		// we successfully stopped the timer, the pid was not added to the consumer
+		// so we don't need to notify the consumer about the removal
+		return
+	}
+
+	// the timer has already fired, we need to notify the consumer about the removal
+	df.consumer.Remove(pid)
 }
 
 func (df *durationFilter) Close() error {
