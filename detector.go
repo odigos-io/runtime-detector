@@ -163,22 +163,15 @@ func (d *Detector) procEventLoop() {
 	}
 
 	d.l.Info("Detector event loop stopped")
-	close(d.output)
 }
 
 func (d *Detector) Run(ctx context.Context) error {
+	defer close(d.output)
+
 	ctx, err := d.newStop(ctx)
 	if err != nil {
 		return err
 	}
-
-	// read pid events from the filters chain and pass them to the client
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.procEventLoop()
-	}()
 
 	// load and attach the the required eBPF programs
 	err = d.p.LoadAndAttach()
@@ -191,18 +184,37 @@ func (d *Detector) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	// let the probe know about the PIDs we are interested in, so we can get exit events for them
 	err = d.p.TrackPIDs(pids)
 	if err != nil {
 		return err
 	}
 	d.l.Info("initial scan done", "number of relevant processes found", len(pids))
+
+	// read pid events from the filters chain and pass them to the client
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.procEventLoop()
+	}()
+
+	// feed the PIDs from the initial scan to the first filter
 	for _, pid := range pids {
 		d.filters[0].Add(pid)
 	}
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled
-	err = d.p.ReadEvents(ctx)
+	go d.p.ReadEvents(ctx)
+
+	// block until the context is canceled
+	<-ctx.Done()
+
+	// close the eBPF probe, this should clean all the resources associated with the probes,
+	// as well as trigger the closing of the filters chain
+	err = d.p.Close()
+
 	wg.Wait()
 	close(d.stopped)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

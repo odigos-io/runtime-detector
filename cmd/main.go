@@ -47,7 +47,6 @@ func main() {
 		}
 		close(done)
 	}()
-	defer close(details)
 
 	d, err := detector.NewDetector(ctx, details, opts...)
 	if err != nil {
@@ -73,7 +72,9 @@ func main() {
 	if err := d.Run(ctx); err != nil {
 		l.Error("detector failed", "error", err)
 	}
+	l.Info("detector stopped")
 
 	// wait for the details channel to be closed
 	<-done
+	l.Info("exiting")
 }

@@ -123,7 +123,7 @@ func (p *Probe) attach() error {
 	return nil
 }
 
-func (p *Probe) close() error {
+func (p *Probe) Close() error {
 	var err error
 
 	for _, l := range p.links {
@@ -182,7 +182,7 @@ func (p *Probe) TrackPIDs(pids []int) error {
 	return nil
 }
 
-func (p *Probe) ReadEvents(ctx context.Context) error {
+func (p *Probe) ReadEvents(ctx context.Context) {
 	var record perf.Record
 	var event processEvent
 
@@ -227,6 +227,4 @@ LOOP:
 			}
 		}
 	}
-
-	return p.close()
 }
