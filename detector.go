@@ -8,31 +8,46 @@ import (
 	"sync"
 	"time"
 
+	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
 	k8sfilter "github.com/odigos-io/runtime-detector/internal/k8s_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
-	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
 )
 
 const defaultMinDuration = (1 * time.Second)
 
 type Detector struct {
-	p       *probe.Probe
-	filters []filter.ProcessesFilter
-	l       *slog.Logger
-	pids    chan int
-	output  chan<- *Details
-	envKeys map[string]struct{}
+	p          *probe.Probe
+	filters    []common.ProcessesFilter
+	l          *slog.Logger
+	procEvents chan common.PIDEvent
+	output     chan<- ProcessEvent
+	envKeys    map[string]struct{}
 
 	stopMu  sync.Mutex
 	stop    context.CancelFunc
 	stopped chan struct{}
 }
 
-type Details struct {
-	// ProcessID is the process ID of the detected process
-	ProcessID int
+type ProcessEventType int
+
+const (
+	ProcessExecEvent ProcessEventType = iota
+	ProcessExitEvent
+)
+
+type ProcessEvent struct {
+	// EventType is the type of the process event
+	EventType ProcessEventType
+	// PID is the process ID of the process which is the subject of the event
+	PID int
+	// ExecDetails is the details of the process execution event, it is only set for the Exec event
+	// for other events, it is nil
+	ExecDetails *ProcessExecDetails
+}
+
+type ProcessExecDetails struct {
 	// Name of the executable: (e.g. /usr/bin/bash, /usr/local/bin/node)
 	ExeName string
 	// Symbolic link to the executable, this can be used to read the binary's metadata
@@ -62,7 +77,7 @@ type fnOpt func(context.Context, detectorConfig) (detectorConfig, error)
 
 func (o fnOpt) apply(ctx context.Context, c detectorConfig) (detectorConfig, error) { return o(ctx, c) }
 
-func NewDetector(ctx context.Context, output chan<- *Details, opts ...DetectorOption) (*Detector, error) {
+func NewDetector(ctx context.Context, output chan<- ProcessEvent, opts ...DetectorOption) (*Detector, error) {
 	if output == nil {
 		return nil, errors.New("output channel is nil")
 	}
@@ -72,83 +87,91 @@ func NewDetector(ctx context.Context, output chan<- *Details, opts ...DetectorOp
 		return nil, err
 	}
 
-	pids := make(chan int)
+	procEvents := make(chan common.PIDEvent)
 
 	// the following steps are used to create the filters chain
 	// 1. ebpf probe generating events and doing basic filtering
 	// 2. duration filter to filter out short-lived processes
 	// 3. k8s filter to check if the process is running in a k8s pod
-	k8s := k8sfilter.NewK8sFilter(c.logger, pids)
+	k8s := k8sfilter.NewK8sFilter(c.logger, procEvents)
 	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, k8s)
 	p := probe.New(c.logger, durationFilter)
 
-	filters := []filter.ProcessesFilter{durationFilter, k8s}
+	filters := []common.ProcessesFilter{durationFilter, k8s}
 
 	d := &Detector{
-		p:       p,
-		filters: filters,
-		l:       c.logger,
-		pids:    pids,
-		output:  output,
-		envKeys: c.envs,
+		p:          p,
+		filters:    filters,
+		l:          c.logger,
+		procEvents: procEvents,
+		output:     output,
+		envKeys:    c.envs,
 	}
 
 	return d, nil
 }
 
-func (d *Detector) detailsForPID(pid int) *Details {
+func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 	cmd, err := proc.GetCmdline(pid)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	env, err := proc.GetEnvironmentVars(pid, d.envKeys)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	link, exeName := proc.GetExeNameAndLink(pid)
 
 	cPID, err := d.p.GetContainerPID(pid)
 	if err != nil {
+		// log the error and continue currently not returning an error
+		// since this might cause if we have an event which is a result of the initial scan
+		// (i.e we missed the exec event)
 		d.l.Error("failed to get container PID", "pid", pid, "error", err)
 	}
 
-	return &Details{
-		ProcessID:          pid,
+	return &ProcessExecDetails{
 		ExeName:            exeName,
 		ExeLink:            link,
 		CmdLine:            cmd,
 		Environments:       env,
 		ContainerProcessID: cPID,
-	}
+	}, nil
 }
 
-func (d *Detector) eventLoop() {
-	for pid := range d.pids {
-		details := d.detailsForPID(pid)
-		if details != nil {
-			d.output <- details
+func (d *Detector) procEventLoop() {
+	for e := range d.procEvents {
+		pe := ProcessEvent{PID: e.Pid}
+		switch e.Type {
+		case common.EventTypeExec:
+			execDetails, err := d.processExecDetails(e.Pid)
+			if err != nil {
+				d.l.Error("failed to get process details", "pid", e.Pid, "error", err)
+				continue
+			}
+			pe.ExecDetails = execDetails
+			pe.EventType = ProcessExecEvent
+			d.output <- pe
+		case common.EventTypeExit:
+			pe.EventType = ProcessExitEvent
+			d.output <- pe
+		default:
+			d.l.Error("unknown event type", "type", e.Type)
 		}
-
 	}
+
 	d.l.Info("Detector event loop stopped")
-	close(d.output)
 }
 
 func (d *Detector) Run(ctx context.Context) error {
+	defer close(d.output)
+
 	ctx, err := d.newStop(ctx)
 	if err != nil {
 		return err
 	}
-
-	// read pid events from the filters chain and pass them to the client
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		d.eventLoop()
-	}()
 
 	// load and attach the the required eBPF programs
 	err = d.p.LoadAndAttach()
@@ -156,17 +179,42 @@ func (d *Detector) Run(ctx context.Context) error {
 		return err
 	}
 
-	// initial scan of all processes, and send them to the first filter
-	pids, err := proc.AllProcesses()
+	// initial scan of all relevant processes, and send them to the first filter
+	pids, err := proc.AllRelevantProcesses()
 	if err != nil {
 		return err
 	}
+
+	// let the probe know about the PIDs we are interested in, so we can get exit events for them
+	err = d.p.TrackPIDs(pids)
+	if err != nil {
+		return err
+	}
+	d.l.Info("initial scan done", "number of relevant processes found", len(pids))
+
+	// read pid events from the filters chain and pass them to the client
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.procEventLoop()
+	}()
+
+	// feed the PIDs from the initial scan to the first filter
 	for _, pid := range pids {
 		d.filters[0].Add(pid)
 	}
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled
-	err = d.p.ReadEvents(ctx)
+	go d.p.ReadEvents(ctx)
+
+	// block until the context is canceled
+	<-ctx.Done()
+
+	// close the eBPF probe, this should clean all the resources associated with the probes,
+	// as well as trigger the closing of the filters chain
+	err = d.p.Close()
+
 	wg.Wait()
 	close(d.stopped)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

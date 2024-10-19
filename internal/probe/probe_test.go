@@ -13,6 +13,6 @@ func TestLoad(t *testing.T) {
 	}
 
 	err := p.load(uint32(4026532561))
-	defer p.close()
+	defer p.Close()
 	assert.NoError(t, err)
 }

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/odigos-io/runtime-detector/internal/common"
 	"github.com/odigos-io/runtime-detector/internal/proc"
-	filter "github.com/odigos-io/runtime-detector/internal/process_filter"
 )
 
 var (
@@ -24,10 +24,10 @@ type k8sProcessesFilter struct {
 	l *slog.Logger
 
 	// the consumer of process events supplied by the k8s filter
-	output chan<- int
+	output chan<- common.PIDEvent
 }
 
-func NewK8sFilter(l *slog.Logger, output chan<- int) filter.ProcessesFilter {
+func NewK8sFilter(l *slog.Logger, output chan<- common.PIDEvent) common.ProcessesFilter {
 	return &k8sProcessesFilter{
 		l:      l,
 		output: output,
@@ -67,7 +67,7 @@ func (k *k8sProcessesFilter) Add(pid int) {
 		return
 	}
 
-	k.output <- pid
+	k.output <- common.PIDEvent{Pid: pid, Type: common.EventTypeExec}
 
 	k.l.Debug("k8s filter received pid",
 		"pid", pid,
@@ -84,5 +84,5 @@ func (k *k8sProcessesFilter) Close() error {
 }
 
 func (k *k8sProcessesFilter) Remove(pid int) {
-	return
+	k.output <- common.PIDEvent{Pid: pid, Type: common.EventTypeExit}
 }

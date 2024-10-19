@@ -25,29 +25,34 @@ func main() {
 		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME", "ODIGOS_CONTAINER_NAME", "ODIGOS_WORKLOAD_NAMESPACE"),
 	}
 
-	details := make(chan *detector.Details)
+	details := make(chan detector.ProcessEvent)
 	done := make(chan struct{})
 	go func() {
 		for d := range details {
-			l.Info("detected new process",
-				"pid", d.ProcessID,
-				"cmd", d.CmdLine,
-				"exeName", d.ExeName,
-				"exeLink", d.ExeLink,
-				"envs", d.Environments,
-				"container PID", d.ContainerProcessID,
-			)
+			switch d.EventType {
+			case detector.ProcessExecEvent:
+				l.Info("detected new process",
+					"pid", d.PID,
+					"cmd", d.ExecDetails.CmdLine,
+					"exeName", d.ExecDetails.ExeName,
+					"exeLink", d.ExecDetails.ExeLink,
+					"envs", d.ExecDetails.Environments,
+					"container PID", d.ExecDetails.ContainerProcessID,
+				)
+			case detector.ProcessExitEvent:
+				l.Info("detected process exit",
+					"pid", d.PID,
+				)
+			}
 		}
 		close(done)
 	}()
-	defer close(details)
 
 	d, err := detector.NewDetector(ctx, details, opts...)
 	if err != nil {
 		l.Error("failed to create detector", "error", err)
 		os.Exit(1)
 	}
-	defer d.Stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan os.Signal, 1)
@@ -64,8 +69,12 @@ func main() {
 		}
 	}()
 
-	go d.Run(ctx)
+	if err := d.Run(ctx); err != nil {
+		l.Error("detector failed", "error", err)
+	}
+	l.Info("detector stopped")
 
-	<-ctx.Done()
+	// wait for the details channel to be closed
 	<-done
+	l.Info("exiting")
 }
