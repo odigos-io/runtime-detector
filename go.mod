@@ -1,6 +1,6 @@
 module github.com/odigos-io/runtime-detector
 
-go 1.22.5
+go 1.22.0
 
 require github.com/cilium/ebpf v0.16.0
 
