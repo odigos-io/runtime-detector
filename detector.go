@@ -77,6 +77,13 @@ type fnOpt func(context.Context, detectorConfig) (detectorConfig, error)
 
 func (o fnOpt) apply(ctx context.Context, c detectorConfig) (detectorConfig, error) { return o(ctx, c) }
 
+// NewDetector creates a new [Detector] instance, which can be used to detect process creation and exit events.
+// The detector will use the provided output channel to send the detected events.
+// Once [Run] is called, the detector will start monitoring the system for process events.
+//
+// The detector can be configured using the provided [DetectorOption]s.
+//
+// The output channel will be closed when the detector stops.
 func NewDetector(ctx context.Context, output chan<- ProcessEvent, opts ...DetectorOption) (*Detector, error) {
 	if output == nil {
 		return nil, errors.New("output channel is nil")
@@ -165,6 +172,12 @@ func (d *Detector) procEventLoop() {
 	d.l.Info("Detector event loop stopped")
 }
 
+// Run starts the detector, and blocks until the one of the following happens:
+// 1. The context is canceled
+// 2. An un-recoverable error occurs
+// 3. The detector is stopped using [Stop]
+//
+// The output channel will be closed when the detector stops.
 func (d *Detector) Run(ctx context.Context) error {
 	defer close(d.output)
 
@@ -236,6 +249,7 @@ func (d *Detector) newStop(parent context.Context) (context.Context, error) {
 	return ctx, nil
 }
 
+// Stop stops the detector, and blocks until the detector is stopped and all the resources are cleaned up.
 func (d *Detector) Stop() error {
 	d.stopMu.Lock()
 	defer d.stopMu.Unlock()
