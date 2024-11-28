@@ -24,10 +24,6 @@ type Detector struct {
 	procEvents chan common.PIDEvent
 	output     chan<- ProcessEvent
 	envKeys    map[string]struct{}
-
-	stopMu  sync.Mutex
-	stop    context.CancelFunc
-	stopped chan struct{}
 }
 
 type ProcessEventType int
@@ -41,6 +37,9 @@ type ProcessEvent struct {
 	// EventType is the type of the process event
 	EventType ProcessEventType
 	// PID is the process ID of the process which is the subject of the event
+	// This PID is in the PID namespace the user sees: i.e if the process is running in a container,
+	// it will be from the container namespace. if the process is running in the host namespace,
+	// this PID is the PID of the process in the host namespace.
 	PID int
 	// ExecDetails is the details of the process execution event, it is only set for the Exec event
 	// for other events, it is nil
@@ -175,19 +174,13 @@ func (d *Detector) procEventLoop() {
 // Run starts the detector, and blocks until the one of the following happens:
 // 1. The context is canceled
 // 2. An un-recoverable error occurs
-// 3. The detector is stopped using [Stop]
 //
 // The output channel will be closed when the detector stops.
 func (d *Detector) Run(ctx context.Context) error {
 	defer close(d.output)
 
-	ctx, err := d.newStop(ctx)
-	if err != nil {
-		return err
-	}
-
 	// load and attach the the required eBPF programs
-	err = d.p.LoadAndAttach()
+	err := d.p.LoadAndAttach()
 	if err != nil {
 		return err
 	}
@@ -219,7 +212,11 @@ func (d *Detector) Run(ctx context.Context) error {
 	}
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled
-	go d.p.ReadEvents(ctx)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d.p.ReadEvents(ctx)
+	}()
 
 	// block until the context is canceled
 	<-ctx.Done()
@@ -229,38 +226,10 @@ func (d *Detector) Run(ctx context.Context) error {
 	err = d.p.Close()
 
 	wg.Wait()
-	close(d.stopped)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
 	return err
-}
-
-func (d *Detector) newStop(parent context.Context) (context.Context, error) {
-	d.stopMu.Lock()
-	defer d.stopMu.Unlock()
-
-	if d.stop != nil {
-		return parent, errors.New("Detector already running")
-	}
-
-	ctx, stop := context.WithCancel(parent)
-	d.stop, d.stopped = stop, make(chan struct{})
-	return ctx, nil
-}
-
-// Stop stops the detector, and blocks until the detector is stopped and all the resources are cleaned up.
-func (d *Detector) Stop() error {
-	d.stopMu.Lock()
-	defer d.stopMu.Unlock()
-
-	if d.stop != nil {
-		d.stop()
-		<-d.stopped
-
-		d.stop, d.stopped = nil, nil
-	}
-	return nil
 }
 
 func newDefaultLogger() *slog.Logger {
