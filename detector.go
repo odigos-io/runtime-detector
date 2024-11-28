@@ -18,12 +18,13 @@ import (
 const defaultMinDuration = (1 * time.Second)
 
 type Detector struct {
-	p          *probe.Probe
-	filters    []common.ProcessesFilter
-	l          *slog.Logger
-	procEvents chan common.PIDEvent
-	output     chan<- ProcessEvent
-	envKeys    map[string]struct{}
+	p               *probe.Probe
+	filters         []common.ProcessesFilter
+	l               *slog.Logger
+	procEvents      chan common.PIDEvent
+	output          chan<- ProcessEvent
+	envKeys         map[string]struct{}
+	envPrefixFilter string
 }
 
 type ProcessEventType int
@@ -62,9 +63,10 @@ type ProcessExecDetails struct {
 }
 
 type detectorConfig struct {
-	logger      *slog.Logger
-	minDuration time.Duration
-	envs        map[string]struct{}
+	logger          *slog.Logger
+	minDuration     time.Duration
+	envs            map[string]struct{}
+	envPrefixFilter string
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -101,17 +103,18 @@ func NewDetector(ctx context.Context, output chan<- ProcessEvent, opts ...Detect
 	// 3. k8s filter to check if the process is running in a k8s pod
 	k8s := k8sfilter.NewK8sFilter(c.logger, procEvents)
 	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, k8s)
-	p := probe.New(c.logger, durationFilter)
+	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter})
 
 	filters := []common.ProcessesFilter{durationFilter, k8s}
 
 	d := &Detector{
-		p:          p,
-		filters:    filters,
-		l:          c.logger,
-		procEvents: procEvents,
-		output:     output,
-		envKeys:    c.envs,
+		p:               p,
+		filters:         filters,
+		l:               c.logger,
+		procEvents:      procEvents,
+		output:          output,
+		envKeys:         c.envs,
+		envPrefixFilter: c.envPrefixFilter,
 	}
 
 	return d, nil
@@ -186,7 +189,7 @@ func (d *Detector) Run(ctx context.Context) error {
 	}
 
 	// initial scan of all relevant processes, and send them to the first filter
-	pids, err := proc.AllRelevantProcesses()
+	pids, err := proc.AllRelevantProcesses(d.envPrefixFilter)
 	if err != nil {
 		return err
 	}
@@ -294,6 +297,18 @@ func WithEnvironments(envs ...string) DetectorOption {
 			envsMap[e] = struct{}{}
 		}
 		c.envs = envsMap
+		return c, nil
+	})
+}
+
+// WithEnvPrefixFilter returns a [DetectorOption] that configures a [Detector] to filter process events
+// based on the environment variables set for the process. If one of the environment variables key matches the prefix,
+// the event will be reported. If the value is empty, no filtering will be done based on the environment variables.
+// If the value is not empty, the detector will only report events for processes that have an environment variable
+// with the specified prefix.
+func WithEnvPrefixFilter(prefix string) DetectorOption {
+	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+		c.envPrefixFilter = prefix
 		return c, nil
 	})
 }
