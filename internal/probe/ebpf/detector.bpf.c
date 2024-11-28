@@ -65,23 +65,29 @@ typedef struct process_event {
 // It is set by the userspace code.
 volatile const u32 configured_pid_ns_inode = 0;
 
-static __always_inline bool is_env_prefix_match(char *env) {
+// return the configured env prefix for filtering, or NULL if invalid
+static __always_inline env_prefix_t *get_env_prefix() {
     u32 key = 0;
     char prefix[MAX_ENV_PREFIX_LEN] = {0};
     env_prefix_t *configured_prefix = bpf_map_lookup_elem(&env_prefix, &key);
 
     if (!configured_prefix) {
         bpf_printk("Env prefix not configured\n");
-        return false;
+        return NULL;
     }
 
     // the user space code should validate that the prefix is not longer than MAX_ENV_PREFIX_LEN as well.
     u64 len = configured_prefix->len;
     if (len > MAX_ENV_PREFIX_LEN) {
         bpf_printk("Env prefix is too long: %lld\n", len);
-        return false;
+        return NULL ;
     }
 
+    return configured_prefix;
+}
+
+static __always_inline bool is_env_prefix_match(char *env, env_prefix_t *configured_prefix) {
+    u64 len = configured_prefix->len;
     for (int i = 0; i < (len & MAX_ENV_PREFIX_MASK); i++) {
         if (env[i] != configured_prefix->prefix[i]) {
             return false;
@@ -145,6 +151,10 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     char buf[MAX_ENV_PREFIX_LEN + 1] = {0};
     long ret;
     bool found_relevant = false;
+    env_prefix_t *configured_prefix = get_env_prefix();
+    if (!configured_prefix) {
+        return 0;
+    }
 
     #pragma unroll
 	for (int i = 1; i < MAX_ENV_VARS; i++) {
@@ -158,7 +168,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 			return 0;
         }
 
-        if (is_env_prefix_match(&buf[0])) {
+        if (is_env_prefix_match(&buf[0], configured_prefix)) {
             found_relevant = true;
             break;
         }
