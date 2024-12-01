@@ -16,10 +16,6 @@ var (
 	ErrorProcessNotFound = fmt.Errorf("process not found")
 )
 
-const (
-	odigosEnvVarKeyPrefix = "ODIGOS_POD"
-)
-
 func procFile(pid int, filename string) string {
 	return fmt.Sprintf("%s/%d/%s", procFS, pid, filename)
 }
@@ -126,18 +122,18 @@ func getPodIDContainerNameFromReader(r io.Reader) (string, string, error) {
 	return "", "", ErrorNotK8sProcess
 }
 
-func isProcessRelevantToOdigos(pid int) bool {
+func isProcessRelevantToOdigos(pid int, prefix string) bool {
 	path := procFile(pid, "environ")
 	fileContent, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 
-	// don't fully pares the environment, just check if it contains the ODIGOS_ prefix
-	return strings.Contains(string(fileContent), odigosEnvVarKeyPrefix)
+	// don't fully pares the environment, just check if it contains the prefix
+	return strings.Contains(string(fileContent), prefix)
 }
 
-func AllRelevantProcesses() ([]int, error) {
+func AllRelevantProcesses(envPrefix string) ([]int, error) {
 	d, err := os.Open(procFS)
 	if err != nil {
 		return nil, err
@@ -156,7 +152,7 @@ func AllRelevantProcesses() ([]int, error) {
 			continue
 		}
 
-		if !isProcessRelevantToOdigos(int(pid)) {
+		if !isProcessRelevantToOdigos(int(pid), envPrefix) {
 			continue
 		}
 

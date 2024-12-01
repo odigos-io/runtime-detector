@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -26,6 +27,8 @@ type Probe struct {
 
 	// the consumer of process events supplied by the probe
 	consumer common.ProcessesFilter
+
+	envPrefixFilter string
 }
 
 type processEvent struct {
@@ -40,12 +43,22 @@ const (
 	processExecProgramName   = "tracepoint__syscalls__sys_enter_execve"
 	processExitProgramName   = "tracepoint__sched__sched_process_exit"
 	pidToContainerPIDMapName = "user_pid_to_container_pid"
+	envPrefixMapName         = "env_prefix"
 )
 
-func New(logger *slog.Logger, f common.ProcessesFilter) *Probe {
+type Config struct {
+	// EnvPrefixFilter can be used to filter the events based on the environment variables
+	// set for the process. If one of the environment variables key matches the prefix,
+	// the event will be reported.
+	// If the value is empty, no filtering will be done based on the environment variables.
+	EnvPrefixFilter string
+}
+
+func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
 	return &Probe{
-		logger:   logger,
-		consumer: f,
+		logger:          logger,
+		consumer:        f,
+		envPrefixFilter: config.EnvPrefixFilter,
 	}
 }
 
@@ -94,6 +107,40 @@ func (p *Probe) load(ns uint32) error {
 	}
 
 	p.c = c
+	// set env prefix filter by writing it to the map
+	err = p.setEnvPrefixFilter()
+	if err != nil {
+		return fmt.Errorf("can't set env prefix filter: %w", err)
+	}
+	p.logger.Info("eBPF probes loaded", "env prefix filter", p.envPrefixFilter)
+	return nil
+}
+
+const maxEnvPrefixLength = int(unsafe.Sizeof(bpfEnvPrefixT{}.Prefix))
+
+func (p *Probe) setEnvPrefixFilter() error {
+	if p.c == nil {
+		return errors.New("no eBPF collection loaded")
+	}
+
+	m, ok := p.c.Maps[envPrefixMapName]
+	if !ok {
+		return errors.New("env_prefix map not found")
+	}
+
+	prefix := p.envPrefixFilter
+
+	if len(prefix) > maxEnvPrefixLength {
+		return fmt.Errorf("env prefix filter is too long: provide length is %d, max allowed length is %d", len(prefix), maxEnvPrefixLength)
+	}
+
+	key := uint32(0)
+	value := bpfEnvPrefixT{Len: uint64(len(prefix))}
+	copy(value.Prefix[:], prefix)
+
+	if err := m.Put(key, value); err != nil {
+		return fmt.Errorf("can't put env prefix in map: %w", err)
+	}
 	return nil
 }
 

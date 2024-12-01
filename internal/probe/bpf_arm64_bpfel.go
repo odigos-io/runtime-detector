@@ -12,6 +12,11 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpfEnvPrefixT struct {
+	Len    uint64
+	Prefix [128]uint8
+}
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -61,6 +66,7 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
+	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
@@ -85,6 +91,7 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
+	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
@@ -92,6 +99,7 @@ type bpfMaps struct {
 
 func (m *bpfMaps) Close() error {
 	return _BpfClose(
+		m.EnvPrefix,
 		m.Events,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
