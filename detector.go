@@ -10,7 +10,7 @@ import (
 
 	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
-	k8sfilter "github.com/odigos-io/runtime-detector/internal/k8s_filter"
+	cmd "github.com/odigos-io/runtime-detector/internal/cmd_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -59,6 +59,7 @@ type ProcessExecDetails struct {
 	// with their values. If a given key is not found, it will not be included in the map.
 	Environments map[string]string
 	// the PID of the process in the container namespace, if the process is running in a container.
+	// if BTF is not enabled, this value will be invalid, and should not be used.
 	ContainerProcessID int
 }
 
@@ -67,6 +68,7 @@ type detectorConfig struct {
 	minDuration     time.Duration
 	envs            map[string]struct{}
 	envPrefixFilter string
+	cmdsToFilter    []string
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -100,12 +102,12 @@ func NewDetector(ctx context.Context, output chan<- ProcessEvent, opts ...Detect
 	// the following steps are used to create the filters chain
 	// 1. ebpf probe generating events and doing basic filtering
 	// 2. duration filter to filter out short-lived processes
-	// 3. k8s filter to check if the process is running in a k8s pod
-	k8s := k8sfilter.NewK8sFilter(c.logger, procEvents)
-	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, k8s)
+	// 3. cmdFilter filter to check if the process is running in a cmdFilter pod
+	cmdFilter := cmd.NewCmdFilter(c.logger, c.cmdsToFilter, procEvents)
+	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, cmdFilter)
 	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter})
 
-	filters := []common.ProcessesFilter{durationFilter, k8s}
+	filters := []common.ProcessesFilter{durationFilter, cmdFilter}
 
 	d := &Detector{
 		p:               p,
@@ -279,7 +281,7 @@ func WithLogger(l *slog.Logger) DetectorOption {
 }
 
 // WithMinDuration returns a [DetectorOption] that configures a [Detector] to use the specified minimum duration
-// for a process to be considered active, the default is 1 second. This is used to filter out shot-lived processes.
+// for a process to be considered active, the default is 1 second. This is used to filter out short-lived processes.
 func WithMinDuration(d time.Duration) DetectorOption {
 	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
 		c.minDuration = d
@@ -309,6 +311,15 @@ func WithEnvironments(envs ...string) DetectorOption {
 func WithEnvPrefixFilter(prefix string) DetectorOption {
 	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
 		c.envPrefixFilter = prefix
+		return c, nil
+	})
+}
+
+// WithCmdsToFilter returns a [DetectorOption] that configures a [Detector] to filter out processes with the specified
+// commands. If a process has a command that matches one of the provided commands, it will be filtered out and not reported.
+func WithCmdsToFilter(cmds ...string) DetectorOption {
+	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+		c.cmdsToFilter = cmds
 		return c, nil
 	})
 }

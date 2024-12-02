@@ -18,6 +18,7 @@ import (
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_no_btf ./ebpf/detector.bpf.c -- -DNO_BTF -DBPF_NO_PRESERVE_ACCESS_INDEX
 
 type Probe struct {
 	logger *slog.Logger
@@ -80,6 +81,25 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
+func createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Collection, error) {
+	err := spec.RewriteConstants(map[string]interface{}{
+		"configured_pid_ns_inode": ns,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("can't rewrite constants: %w", err)
+	}
+
+	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
+	if err != nil {
+		var ve *ebpf.VerifierError
+		if errors.As(err, &ve) {
+			fmt.Printf("Verifier log: %-100v\n", ve)
+		}
+		return nil, err
+	}
+	return c, nil
+}
+
 func (p *Probe) load(ns uint32) error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
@@ -91,18 +111,17 @@ func (p *Probe) load(ns uint32) error {
 		return err
 	}
 
-	err = spec.RewriteConstants(map[string]interface{}{
-		"configured_pid_ns_inode": ns,
-	})
-	if err != nil {
-		return fmt.Errorf("can't rewrite constants: %w", err)
-	}
+	c, err := createCollection(spec, ns)
+	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
+		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled")
+		spec, err = loadBpf_no_btf()
+		if err != nil {
+			return err
+		}
 
-	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
-	if err != nil {
-		var ve *ebpf.VerifierError
-		if errors.As(err, &ve) {
-			fmt.Printf("Verifier log: %-100v\n", ve)
+		c, err = createCollection(spec, ns)
+		if err != nil {
+			return fmt.Errorf("can't create eBPF collection: %w", err)
 		}
 	}
 

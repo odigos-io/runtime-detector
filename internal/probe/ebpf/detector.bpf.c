@@ -1,6 +1,9 @@
 #include "vmlinux.h"
 #include "bpf_helpers.h"
+
+#ifndef NO_BTF
 #include "bpf_core_read.h"
+#endif
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
@@ -80,7 +83,7 @@ static __always_inline env_prefix_t *get_env_prefix() {
     u64 len = configured_prefix->len;
     if (len > MAX_ENV_PREFIX_LEN) {
         bpf_printk("Env prefix is too long: %lld\n", len);
-        return NULL ;
+        return NULL;
     }
 
     return configured_prefix;
@@ -103,6 +106,7 @@ typedef struct pids_in_ns {
     u32 last_level_pid;
 } pids_in_ns_t;
 
+#ifndef NO_BTF
 static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids) {
     struct upid upid =     {0};
     u32 inum =              0;
@@ -135,6 +139,7 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
 
     return 0;
 }
+#endif
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
@@ -178,16 +183,22 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     pids_in_ns_t pids = {0};
+
+#ifdef NO_BTF
+    pids.configured_ns_pid = pid;
+    pids.last_level_pid = 0;
+#else
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids);
     if (ret < 0) {
         bpf_printk("Could not find PID for task: 0x%llx", bpf_get_current_pid_tgid());
         return 0;
     }
+#endif
 
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret != 0) {
         bpf_printk("Failed to update PID to NS PID map: %d", ret);
@@ -229,13 +240,18 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
     u32 *selected_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
     if (selected_pid == NULL) {
         // get the pid in the configured namespace
-        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
         pids_in_ns_t pids = {0};
+#ifdef NO_BTF
+        pids.configured_ns_pid = pid;
+        pids.last_level_pid = 0;
+#else
+        struct task_struct *task = (struct task_struct *)bpf_get_current_task();
         ret = get_pid_for_configured_ns(task, &pids);
         if (ret < 0) {
             bpf_printk("process exit: Could not find PID for task return code: %ld", ret);
             return 0;
         }
+#endif
         // find out if this exit event is for a process we are interested in
         // this can happen if this map was written to by the user space
         void *found = bpf_map_lookup_elem(&user_pid_to_container_pid, &pids.configured_ns_pid);
