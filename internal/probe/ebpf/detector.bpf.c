@@ -189,7 +189,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 
 #ifdef NO_BTF
     pids.configured_ns_pid = pid;
-    pids.last_level_pid = pid;
+    pids.last_level_pid = 0;
 #else
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids);
@@ -243,7 +243,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         pids_in_ns_t pids = {0};
 #ifdef NO_BTF
         pids.configured_ns_pid = pid;
-        pids.last_level_pid = pid;
+        pids.last_level_pid = 0;
 #else
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();
         ret = get_pid_for_configured_ns(task, &pids);
