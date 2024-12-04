@@ -220,19 +220,15 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_exit_clone")
-int tracepoint__syscalls__sys_exit_clone(struct syscall_trace_exit* ctx) {
+SEC("tracepoint/sched/sched_process_fork")
+int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork* ctx) {
     long ret_code = 0; 
 
-    // the returned pid is the pid of the new process (from the kernel perspective)
-    u32 returned_pid = (u32)ctx->ret;
-    if (returned_pid == 0) {
-        return 0;
-    }
+    u32 parent_pid = (u32)(ctx->parent_pid);
+    u32 child_pid = (u32)(ctx->child_pid);
 
-    // assume that this clone/fork is called from a process we are tracking (went through execve)
-    u32 caller_pid = (u32)(bpf_get_current_pid_tgid() & 0xFFFFFFFF);
-    u32 *tracked_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &caller_pid);
+    // check if that this clone/fork is called from a process we are tracking (went through execve)
+    u32 *tracked_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
     if (tracked_pid == NULL) {
         return 0;
     }
@@ -240,7 +236,7 @@ int tracepoint__syscalls__sys_exit_clone(struct syscall_trace_exit* ctx) {
     pids_in_ns_t pids = {0};
 
 #ifdef NO_BTF
-    pids.configured_ns_pid = returned_pid;
+    pids.configured_ns_pid = child_pid;
     pids.last_level_pid = 0;
 #else
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
@@ -251,7 +247,7 @@ int tracepoint__syscalls__sys_exit_clone(struct syscall_trace_exit* ctx) {
     }
 #endif
 
-    bpf_printk("clone/fork: caller_pid: %d, returned_pid: %d, configured_ns_pid: %d, last_level_pid: %d\n", caller_pid, returned_pid, pids.configured_ns_pid, pids.last_level_pid);
+    bpf_printk("clone/fork: parent_pid: %d, child_pid: %d, configured_ns_pid: %d, last_level_pid: %d\n", parent_pid, child_pid, pids.configured_ns_pid, pids.last_level_pid);
 
     // process_event_t event = {
     //     // TODO: should we tell the user space that this was a result of clone/fork/exec? or just tell its a new process

@@ -59,8 +59,8 @@ type bpfSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfProgramSpecs struct {
 	TracepointSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
+	TracepointSchedSchedProcessFork  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
-	TracepointSyscallsSysExitClone   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_clone"`
 }
 
 // bpfMapSpecs contains maps before they are loaded into the kernel.
@@ -112,15 +112,15 @@ func (m *bpfMaps) Close() error {
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfPrograms struct {
 	TracepointSchedSchedProcessExit  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
+	TracepointSchedSchedProcessFork  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
-	TracepointSyscallsSysExitClone   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_clone"`
 }
 
 func (p *bpfPrograms) Close() error {
 	return _BpfClose(
 		p.TracepointSchedSchedProcessExit,
+		p.TracepointSchedSchedProcessFork,
 		p.TracepointSyscallsSysEnterExecve,
-		p.TracepointSyscallsSysExitClone,
 	)
 }
 

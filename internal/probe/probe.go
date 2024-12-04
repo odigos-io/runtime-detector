@@ -42,7 +42,7 @@ const (
 
 	eventsMapName            = "events"
 	processExecProgramName   = "tracepoint__syscalls__sys_enter_execve"
-	processCloneProgramName  = "tracepoint__syscalls__sys_exit_clone"
+	processForkProgramName  = "tracepoint__sched__sched_process_fork"
 	processExitProgramName   = "tracepoint__sched__sched_process_exit"
 	pidToContainerPIDMapName = "user_pid_to_container_pid"
 	envPrefixMapName         = "env_prefix"
@@ -187,7 +187,7 @@ func (p *Probe) attach() error {
 	}
 	p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("syscalls", "sys_exit_clone", p.c.Programs[processCloneProgramName], nil)
+	l, err = link.Tracepoint("sched", "sched_process_fork", p.c.Programs[processForkProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_exit_clone: %w", err)
 	}
