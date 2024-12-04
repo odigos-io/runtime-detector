@@ -60,6 +60,7 @@ type bpf_no_btfSpecs struct {
 type bpf_no_btfProgramSpecs struct {
 	TracepointSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysExitClone   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_clone"`
 }
 
 // bpf_no_btfMapSpecs contains maps before they are loaded into the kernel.
@@ -112,12 +113,14 @@ func (m *bpf_no_btfMaps) Close() error {
 type bpf_no_btfPrograms struct {
 	TracepointSchedSchedProcessExit  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysExitClone   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_clone"`
 }
 
 func (p *bpf_no_btfPrograms) Close() error {
 	return _Bpf_no_btfClose(
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSyscallsSysEnterExecve,
+		p.TracepointSyscallsSysExitClone,
 	)
 }
 
