@@ -192,9 +192,12 @@ func (p *Probe) attach() error {
 
 	if prog, ok := p.c.Programs[processForkProgramName]; ok {
 		// attach to raw tracepoint (we have BTF)
-		l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
+		l, err = link.AttachRawTracepoint((link.RawTracepointOptions{
+			Program: prog,
+			Name:    "sched_process_fork",
+		}))
 		if err != nil {
-			return fmt.Errorf("can't attach probe sched_process_fork: %w", err)
+			return fmt.Errorf("can't attach raw tracepoint sched_process_fork: %w", err)
 		}
 		p.links = append(p.links, l)
 	} else {
