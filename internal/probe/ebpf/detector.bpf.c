@@ -222,7 +222,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 }
 
 #ifndef NO_BTF
-SEC("tp_btf/sched_process_fork")
+SEC("raw_tp/sched_process_fork")
 int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *parent, struct task_struct *child) {
     long ret_code = 0; 
 
