@@ -41,8 +41,9 @@ const (
 	PerfBufferDefaultSizeInPages = 128
 
 	eventsMapName            = "events"
-	processExecProgramName   = "tracepoint__syscalls__sys_enter_execve"
-	processForkProgramName  = "tracepoint__sched__sched_process_fork"
+	execveSyscallProgramName = "tracepoint__syscalls__sys_enter_execve"
+	processForkProgramName   = "tracepoint__sched__sched_process_fork"
+	processExecProgramName   = "tracepoint__sched__sched_process_exec"
 	processExitProgramName   = "tracepoint__sched__sched_process_exit"
 	pidToContainerPIDMapName = "user_pid_to_container_pid"
 	envPrefixMapName         = "env_prefix"
@@ -175,7 +176,7 @@ func (p *Probe) attach() error {
 	}
 	p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[processExecProgramName], nil)
+	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
 	}
@@ -189,7 +190,13 @@ func (p *Probe) attach() error {
 
 	l, err = link.Tracepoint("sched", "sched_process_fork", p.c.Programs[processForkProgramName], nil)
 	if err != nil {
-		return fmt.Errorf("can't attach probe sys_exit_clone: %w", err)
+		return fmt.Errorf("can't attach probe sched_process_fork: %w", err)
+	}
+	p.links = append(p.links, l)
+
+	l, err = link.Tracepoint("sched", "sched_process_exec", p.c.Programs[processExecProgramName], nil)
+	if err != nil {
+		return fmt.Errorf("can't attach probe sched_process_exec: %w", err)
 	}
 	p.links = append(p.links, l)
 
