@@ -242,7 +242,7 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
     u32 child_pid = (u32)BPF_CORE_READ(child, pid);
 
     // filter only relevant pids based on the parent
-    // check if that this clone/fork is called from a process we are tracking (went through execve)
+    // check if that this clone/fork is called from a process we are tracking
     void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
     if (found == NULL) {
         return 0;
@@ -284,6 +284,9 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     long ret_code = 0;
     u32 parent_pid = (u32)ctx->parent_pid;
     u32 child_pid = (u32)ctx->child_pid;
+
+    // TODO: check if this is a thread or a process. without BTF this is not straightforward
+    // we could read /proc/<pid>/status in user space to verify we only pass events on processes (tgid == pid)
 
     // check if that this clone/fork is called from a process we are tracking (went through execve)
     void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);

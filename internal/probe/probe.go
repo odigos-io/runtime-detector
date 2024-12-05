@@ -114,10 +114,8 @@ func (p *Probe) load(ns uint32) error {
 	}
 
 	c, err := createCollection(spec, ns)
-	// TODO: remove this log
-	p.logger.Info("error", err)
 	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
-		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled")
+		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
 		spec, err = loadBpf_no_btf()
 		if err != nil {
 			return err
@@ -190,6 +188,7 @@ func (p *Probe) attach() error {
 	}
 	p.links = append(p.links, l)
 
+	// attach to sched_process_fork tracepoint, first try the version with BTF
 	if prog, ok := p.c.Programs[processForkProgramName]; ok {
 		// attach to raw tracepoint (we have BTF)
 		l, err = link.AttachRawTracepoint((link.RawTracepointOptions{
