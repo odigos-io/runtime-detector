@@ -58,7 +58,6 @@ type bpf_no_btfSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfProgramSpecs struct {
-	TracepointSchedSchedProcessExec  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exec"`
 	TracepointSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSchedSchedProcessFork  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
@@ -70,7 +69,6 @@ type bpf_no_btfProgramSpecs struct {
 type bpf_no_btfMapSpecs struct {
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
-	RelevantForkedPids    *ebpf.MapSpec `ebpf:"relevant_forked_pids"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
 }
@@ -96,7 +94,6 @@ func (o *bpf_no_btfObjects) Close() error {
 type bpf_no_btfMaps struct {
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
-	RelevantForkedPids    *ebpf.Map `ebpf:"relevant_forked_pids"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
 }
@@ -105,7 +102,6 @@ func (m *bpf_no_btfMaps) Close() error {
 	return _Bpf_no_btfClose(
 		m.EnvPrefix,
 		m.Events,
-		m.RelevantForkedPids,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
 	)
@@ -115,7 +111,6 @@ func (m *bpf_no_btfMaps) Close() error {
 //
 // It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_no_btfPrograms struct {
-	TracepointSchedSchedProcessExec  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exec"`
 	TracepointSchedSchedProcessExit  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSchedSchedProcessFork  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
@@ -123,7 +118,6 @@ type bpf_no_btfPrograms struct {
 
 func (p *bpf_no_btfPrograms) Close() error {
 	return _Bpf_no_btfClose(
-		p.TracepointSchedSchedProcessExec,
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSchedSchedProcessFork,
 		p.TracepointSyscallsSysEnterExecve,

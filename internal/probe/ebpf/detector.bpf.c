@@ -41,13 +41,6 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } tracked_pids_to_ns_pids SEC(".maps");
 
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u32);   // the pid created with a fork variant
-	__type(value, u8); // not used
-	__uint(max_entries, MAX_CONCURRENT_PIDS);
-} relevant_forked_pids SEC(".maps");
-
 // The following map is used to store the mapping between the PID in the configured namespace
 // (which the user is aware of) and the PID in the last level namespace (the container PID).
 // It can be read from user-space.
@@ -227,28 +220,29 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
-SEC("tracepoint/sched/sched_process_fork")
-int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork* ctx) {
+#ifndef NO_BTF
+SEC("tp_btf/sched/sched_process_fork")
+int tracepoint_btf__sched__sched_process_fork(struct task_struct *parent, struct task_struct *child) {
     long ret_code = 0; 
 
-    u32 parent_pid = (u32)(ctx->parent_pid);
-    u32 child_pid = (u32)(ctx->child_pid);
+    u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);
+    u32 child_pid = (u32)BPF_CORE_READ(child, pid);
 
     // check if that this clone/fork is called from a process we are tracking (went through execve)
-    u32 *tracked_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
-    if (tracked_pid == NULL) {
+    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
+    if (found == NULL) {
         return 0;
     }
 
-    bpf_printk("clone/fork: parent_pid: %d, child_pid: %d, configured_ns_pid: %d, last_level_pid: %d\n", parent_pid, child_pid);
+    pids_in_ns_t pids = {0};
 
-    // store the child pid in the map
-    u8 dummy_value = 0;
-    ret_code = bpf_map_update_elem(&relevant_forked_pids, &child_pid, &dummy_value, BPF_ANY);
-    if (ret_code != 0) {
-        bpf_printk("Failed to update relevant forked PIDs map: %d", ret_code);
+    ret_code = get_pid_for_configured_ns(child, &pids);
+    if (ret_code < 0) {
+        bpf_printk("Could not find PID for task: 0x%llx", child_pid);
         return 0;
     }
+
+    bpf_printk("clone/fork: parent_pid: %d, child_pid: %d, child configured_ns_pid: %d, child last_level_pid: %d\n", parent_pid, child_pid, pids.configured_ns_pid, pids.last_level_pid);
 
     // process_event_t event = {
     //     // TODO: should we tell the user space that this was a result of clone/fork/exec? or just tell its a new process
@@ -259,36 +253,23 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     // bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
     return 0;
 }
+#else
+SEC("tracepoint/sched/sched_process_fork")
+int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork* ctx) {
+    u32 parent_pid = (u32)ctx->parent_pid;
+    u32 child_pid = (u32)ctx->child_pid;
 
-SEC("tracepoint/sched/sched_process_exec")
-int tracepoint__sched__sched_process_exec(struct trace_event_raw_sched_process_exec* ctx) {
-    u32 pid = (u32)(ctx->pid);
-    u32 old_pid = (u32)(ctx->old_pid);
-
-    long ret_code = 0;
-    void *found = NULL;
-    found = bpf_map_lookup_elem(&relevant_forked_pids, &pid);
-    if (found != NULL) {
-        bpf_printk("process_exec found buy pid forked: pid: %d, old_pid: %d\n", pid, old_pid);
-        ret_code = bpf_map_delete_elem(&relevant_forked_pids, &pid);
-        if (ret_code != 0) {
-            bpf_printk("Failed to delete relevant forked PIDs map: %d", ret_code);
-        }
+    // check if that this clone/fork is called from a process we are tracking (went through execve)
+    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
+    if (found == NULL) {
         return 0;
     }
 
-    found = bpf_map_lookup_elem(&relevant_forked_pids, &old_pid);
-    if (found != NULL) {
-        bpf_printk("process_exec found buy old_pid forked: pid: %d, old_pid: %d\n", pid, old_pid);
-        ret_code = bpf_map_delete_elem(&relevant_forked_pids, &old_pid);
-        if (ret_code != 0) {
-            bpf_printk("Failed to delete relevant forked PIDs map: %d", ret_code);
-        }
-        return 0;
-    }
+    // TODO
 
     return 0;
 }
+#endif
 
 SEC("tracepoint/sched/sched_process_exit")
 int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_exec* ctx) {
