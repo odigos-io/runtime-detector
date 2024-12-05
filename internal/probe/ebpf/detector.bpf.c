@@ -230,6 +230,14 @@ SEC("raw_tp/sched_process_fork")
 int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *parent, struct task_struct *child) {
     long ret_code = 0; 
 
+    u32 parent_tgid = (u32)BPF_CORE_READ(parent, tgid);
+    u32 child_tgid = (u32)BPF_CORE_READ(child, tgid);
+
+    if (parent_tgid == child_tgid) {
+        // this is a thread, not a process
+        return 0;
+    }
+
     u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);
     u32 child_pid = (u32)BPF_CORE_READ(child, pid);
 
