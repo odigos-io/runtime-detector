@@ -221,6 +221,10 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
+/*
+sched_process_fork is located inside the kernel_clone function in the kernel.
+it is common to the syscalls: fork, vfork, clone, and clone3.
+*/
 #ifndef NO_BTF
 SEC("raw_tp/sched_process_fork")
 int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *parent, struct task_struct *child) {
@@ -229,6 +233,7 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
     u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);
     u32 child_pid = (u32)BPF_CORE_READ(child, pid);
 
+    // filter only relevant pids based on the parent
     // check if that this clone/fork is called from a process we are tracking (went through execve)
     void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
     if (found == NULL) {
@@ -243,20 +248,32 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
         return 0;
     }
 
-    bpf_printk("clone/fork: parent_pid: %d, child_pid: %d, child configured_ns_pid: %d, child last_level_pid: %d\n", parent_pid, child_pid, pids.configured_ns_pid, pids.last_level_pid);
+    // track this child pid
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &pids.configured_ns_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
+        return 0;
+    }
 
-    // process_event_t event = {
-    //     // TODO: should we tell the user space that this was a result of clone/fork/exec? or just tell its a new process
-    //     .type = PROCESS_EXEC,
-    //     .pid = pids.configured_ns_pid,
-    // };
+    // populate the map with the container pid, so that user space can read it
+    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
+        return 0;
+    }
 
-    // bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    process_event_t event = {
+        .type = PROCESS_EXEC,
+        .pid = pids.configured_ns_pid,
+    };
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
     return 0;
 }
 #else
 SEC("tracepoint/sched/sched_process_fork")
 int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork* ctx) {
+    long ret_code = 0;
     u32 parent_pid = (u32)ctx->parent_pid;
     u32 child_pid = (u32)ctx->child_pid;
 
@@ -266,8 +283,27 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
         return 0;
     }
 
-    // TODO
+    u32 unknown_pid = 0;
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &child_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
+        return 0;
+    }
 
+    // populate the map with the container pid, so that user space can read it
+    // since we don't have BTF here, we can't get the last level pid
+    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &child_pid, &unknown_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
+        return 0;
+    }
+
+    process_event_t event = {
+        .type = PROCESS_EXEC,
+        .pid = child_pid,
+    };
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
     return 0;
 }
 #endif
@@ -288,7 +324,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
 
     process_event_t event = { .type = PROCESS_EXIT};
 
-    // look this pid in the map, we will find an entry if this process was found relevant in the exec probe
+    // look this pid in the map, we will find an entry if this process was found relevant in the exec/fork probes
     u32 *selected_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
     if (selected_pid == NULL) {
         // get the pid in the configured namespace
