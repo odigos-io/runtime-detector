@@ -3,6 +3,7 @@
 
 #ifndef NO_BTF
 #include "bpf_core_read.h"
+#include "bpf_tracing.h"
 #endif
 
 char __license[] SEC("license") = "Dual MIT/GPL";
@@ -221,8 +222,8 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 }
 
 #ifndef NO_BTF
-SEC("tp_btf/sched/sched_process_fork")
-int tracepoint_btf__sched__sched_process_fork(struct task_struct *parent, struct task_struct *child) {
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *parent, struct task_struct *child) {
     long ret_code = 0; 
 
     u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);

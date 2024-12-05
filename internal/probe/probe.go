@@ -114,6 +114,8 @@ func (p *Probe) load(ns uint32) error {
 	}
 
 	c, err := createCollection(spec, ns)
+	// TODO: remove this log
+	p.logger.Info("error", err)
 	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
 		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled")
 		spec, err = loadBpf_no_btf()
