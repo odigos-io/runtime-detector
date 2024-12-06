@@ -178,7 +178,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
             found_relevant = true;
             break;
         }
-	}
+    }
 
     if (!found_relevant) {
         return 0;
