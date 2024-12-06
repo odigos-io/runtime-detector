@@ -168,6 +168,9 @@ func (d *Detector) procEventLoop() {
 		case common.EventTypeExit:
 			pe.EventType = ProcessExitEvent
 			d.output <- pe
+		case common.EventTypeFork:
+			// these events should be handled internally by the probe, and should not be seen by the detector
+			d.l.Error("unexpected fork event", "pid", e.Pid)
 		default:
 			d.l.Error("unknown event type", "type", e.Type)
 		}

@@ -7,6 +7,7 @@ const (
 	Undefined EventType = iota
 	EventTypeExec
 	EventTypeExit
+	EventTypeFork
 )
 
 type PIDEvent struct {

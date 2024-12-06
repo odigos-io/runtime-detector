@@ -58,6 +58,7 @@ typedef enum {
     UNDEFINED = 0,
     PROCESS_EXEC = 1,
     PROCESS_EXIT = 2,
+    PROCESS_FORK = 3,
 } process_event_type_t;
 
 typedef struct process_event {
@@ -271,7 +272,7 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
     }
 
     process_event_t event = {
-        .type = PROCESS_EXEC,
+        .type = PROCESS_FORK,
         .pid = pids.configured_ns_pid,
     };
 
@@ -310,7 +311,7 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     }
 
     process_event_t event = {
-        .type = PROCESS_EXEC,
+        .type = PROCESS_FORK,
         .pid = child_pid,
     };
 
@@ -330,6 +331,11 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         // Only if the thread group ID matched with the PID the process itself exits. If they don't
         // match only a thread of the process stopped and we do not need to report this PID to
         // userspace for further processing.
+#ifdef NO_BTF
+        // we don't have BTF, hence we might have added the PID to the maps in the fork probe
+        bpf_map_delete_elem(&user_pid_to_container_pid,  &pid);
+        bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
+#endif
         return 0;
     }
 

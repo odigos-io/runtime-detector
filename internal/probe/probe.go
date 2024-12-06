@@ -30,6 +30,7 @@ type Probe struct {
 	consumer common.ProcessesFilter
 
 	envPrefixFilter string
+	btfDisabled     bool
 }
 
 type processEvent struct {
@@ -116,6 +117,7 @@ func (p *Probe) load(ns uint32) error {
 	c, err := createCollection(spec, ns)
 	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
 		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
+		p.btfDisabled = true
 		spec, err = loadBpf_no_btf()
 		if err != nil {
 			return err
@@ -313,6 +315,25 @@ LOOP:
 			switch event.Type {
 			case common.EventTypeExec:
 				p.consumer.Add(int(event.Pid))
+			case common.EventTypeFork:
+				if !p.btfDisabled {
+					// BTF is enabled, we can trust the event is a relevant process being created
+
+					// TODO: remove this log
+					p.logger.Info("BTF enabled. process fork event", "pid", event.Pid)
+					p.consumer.Add(int(event.Pid))
+				} else {
+					// BTF is disabled, we need to check if the PID is a process or thread
+					isProcess, err := proc.IsProcess(int(event.Pid))
+					if err == nil && isProcess {
+						// TODO: remove this log
+						p.logger.Info("BTF disabled. process fork event", "pid", event.Pid)
+						p.consumer.Add(int(event.Pid))
+					} else {
+						// TODO: remove this log
+						p.logger.Info("BTF disabled. thread fork event", "pid", event.Pid)
+					}
+				}
 			case common.EventTypeExit:
 				p.consumer.Remove(int(event.Pid))
 			default:

@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -9,39 +10,39 @@ import (
 
 func TestGetPodIDContainerNameFromReader(t *testing.T) {
 	tests := []struct {
-		name             string
-		input            string
-		expectedPodUID   string
+		name                  string
+		input                 string
+		expectedPodUID        string
 		expectedContainerName string
-		expectError      bool
+		expectError           bool
 	}{
 		{
-			name:             "Valid log with pod and container",
-			input:            "some/log/output/pods/pod1234/containers/my-cool-container-12/",
-			expectedPodUID:   "pod1234",
+			name:                  "Valid log with pod and container",
+			input:                 "some/log/output/pods/pod1234/containers/my-cool-container-12/",
+			expectedPodUID:        "pod1234",
 			expectedContainerName: "my-cool-container-12",
-			expectError:      false,
+			expectError:           false,
 		},
 		{
-			name:             "Log with no pod info",
-			input:            "some/log/output/without/pods/info",
-			expectedPodUID:   "",
+			name:                  "Log with no pod info",
+			input:                 "some/log/output/without/pods/info",
+			expectedPodUID:        "",
 			expectedContainerName: "",
-			expectError:      true,
+			expectError:           true,
 		},
 		{
-			name:             "Log with pod but no container",
-			input:            "some/log/output/pods/pod1234/no/containers/",
-			expectedPodUID:   "",
+			name:                  "Log with pod but no container",
+			input:                 "some/log/output/pods/pod1234/no/containers/",
+			expectedPodUID:        "",
 			expectedContainerName: "",
-			expectError:      true,
+			expectError:           true,
 		},
 		{
-			name:             "Log with extra slashes in container info",
-			input:            "docker/volumes/b78a9ca486ff58e62e860b6a247796230d80b6c7c4fa54e63854d7f99f4820ef/_data/lib/kubelet/pods/d7db6d70-28a3-41f1-a666-8cc5604e695d/containers/frontend/12775f2a",
-			expectedPodUID:   "d7db6d70-28a3-41f1-a666-8cc5604e695d",
+			name:                  "Log with extra slashes in container info",
+			input:                 "docker/volumes/b78a9ca486ff58e62e860b6a247796230d80b6c7c4fa54e63854d7f99f4820ef/_data/lib/kubelet/pods/d7db6d70-28a3-41f1-a666-8cc5604e695d/containers/frontend/12775f2a",
+			expectedPodUID:        "d7db6d70-28a3-41f1-a666-8cc5604e695d",
 			expectedContainerName: "frontend",
-			expectError:      false,
+			expectError:           false,
 		},
 	}
 
@@ -115,10 +116,10 @@ func TestGetCmdlineNoExists(t *testing.T) {
 
 func TestParseEnvironments(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		keys          map[string]struct{}
-		expected      map[string]string
+		name     string
+		input    string
+		keys     map[string]struct{}
+		expected map[string]string
 	}{
 		{
 			name:  "Basic valid input",
@@ -138,16 +139,16 @@ func TestParseEnvironments(t *testing.T) {
 			keys: map[string]struct{}{
 				"KEY3": {},
 			},
-			expected:      map[string]string{},
+			expected: map[string]string{},
 		},
 		{
-			name:          "Empty input",
-			input:         "",
-			keys:          map[string]struct{}{},
-			expected:      map[string]string{},
+			name:     "Empty input",
+			input:    "",
+			keys:     map[string]struct{}{},
+			expected: map[string]string{},
 		},
 		{
-			name: "Val with '='",
+			name:  "Val with '='",
 			input: "KEY1=value1\x00KEY2=value2\x00KEY3=value3\x00KEY4=value4=foo\x00",
 			keys: map[string]struct{}{
 				"KEY2": {},
@@ -159,7 +160,7 @@ func TestParseEnvironments(t *testing.T) {
 			},
 		},
 		{
-			name: "Empty value",
+			name:  "Empty value",
 			input: "KEY1=\x00KEY2=value2\x00",
 			keys: map[string]struct{}{
 				"KEY1": {},
@@ -201,4 +202,35 @@ func TestExtractNSInode(t *testing.T) {
 	inode, err = extractNSInode("pid:[12]")
 	assert.NoError(t, err)
 	assert.Equal(t, uint32(12), inode)
+}
+
+func TestIsProcess(t *testing.T) {
+	tests := []struct {
+		name     string
+		inputFile    string
+		expected bool
+	}{
+		{
+			name: "Valid process",
+			inputFile: "./testdata/proc_status_process.txt",
+			expected: true,
+		},
+		{
+			name: "A thread pid",
+			inputFile: "./testdata/proc_status_thread.txt",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := os.Open(tt.inputFile)
+			assert.NoError(t, err)
+			defer r.Close()
+
+			res, err := isProcessFromReader(r)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, res)
+		})
+	}
 }
