@@ -286,14 +286,14 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     u32 parent_pid = (u32)ctx->parent_pid;
     u32 child_pid = (u32)ctx->child_pid;
 
-    // TODO: check if this is a thread or a process. without BTF this is not straightforward
-    // we could read /proc/<pid>/status in user space to verify we only pass events on processes (tgid == pid)
-
     // check if that this clone/fork is called from a process we are tracking (went through execve)
     void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
     if (found == NULL) {
         return 0;
     }
+
+    // we can't make sure here that the child pid is a new process, and not a thread.
+    // this will be verified in user space (only when BTF is not available)
 
     u32 unknown_pid = 0;
     ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &child_pid, BPF_ANY);

@@ -318,20 +318,12 @@ LOOP:
 			case common.EventTypeFork:
 				if !p.btfDisabled {
 					// BTF is enabled, we can trust the event is a relevant process being created
-
-					// TODO: remove this log
-					p.logger.Info("BTF enabled. process fork event", "pid", event.Pid)
 					p.consumer.Add(int(event.Pid))
 				} else {
 					// BTF is disabled, we need to check if the PID is a process or thread
 					isProcess, err := proc.IsProcess(int(event.Pid))
 					if err == nil && isProcess {
-						// TODO: remove this log
-						p.logger.Info("BTF disabled. process fork event", "pid", event.Pid)
 						p.consumer.Add(int(event.Pid))
-					} else {
-						// TODO: remove this log
-						p.logger.Info("BTF disabled. thread fork event", "pid", event.Pid)
 					}
 				}
 			case common.EventTypeExit:
