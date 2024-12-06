@@ -218,3 +218,41 @@ func GetExeNameAndLink(pid int) (link, exeName string) {
 	}
 	return link, exeName
 }
+
+// IsProcess checks if the given PID corresponds to a process or a thread.
+// It returns true if the PID is a process, and false if it is a thread.
+func IsProcess(pid int) (bool, error) {
+	status := procFile(pid, "status")
+
+	f, err := os.Open(status)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	return isProcessFromReader(f)
+}
+
+func isProcessFromReader(r io.Reader) (bool, error) {
+	var tgid, pid int
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "Tgid:") {
+			fmt.Sscanf(line, "Tgid:\t%d", &tgid)
+		} else if strings.HasPrefix(line, "Pid:") {
+			fmt.Sscanf(line, "Pid:\t%d", &pid)
+		}
+
+		if tgid != 0 && pid != 0 {
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("failed to read /proc/<pid>/status file %v", err)
+	}
+
+	return tgid == pid, nil
+}

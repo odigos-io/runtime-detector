@@ -30,6 +30,7 @@ type Probe struct {
 	consumer common.ProcessesFilter
 
 	envPrefixFilter string
+	btfDisabled     bool
 }
 
 type processEvent struct {
@@ -40,11 +41,13 @@ type processEvent struct {
 const (
 	PerfBufferDefaultSizeInPages = 128
 
-	eventsMapName            = "events"
-	processExecProgramName   = "tracepoint__syscalls__sys_enter_execve"
-	processExitProgramName   = "tracepoint__sched__sched_process_exit"
-	pidToContainerPIDMapName = "user_pid_to_container_pid"
-	envPrefixMapName         = "env_prefix"
+	eventsMapName               = "events"
+	execveSyscallProgramName    = "tracepoint__syscalls__sys_enter_execve"
+	processForkNoBTFProgramName = "tracepoint__sched__sched_process_fork"
+	processForkProgramName      = "tracepoint_btf__sched__sched_process_fork"
+	processExitProgramName      = "tracepoint__sched__sched_process_exit"
+	pidToContainerPIDMapName    = "user_pid_to_container_pid"
+	envPrefixMapName            = "env_prefix"
 )
 
 type Config struct {
@@ -113,7 +116,8 @@ func (p *Probe) load(ns uint32) error {
 
 	c, err := createCollection(spec, ns)
 	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
-		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled")
+		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
+		p.btfDisabled = true
 		spec, err = loadBpf_no_btf()
 		if err != nil {
 			return err
@@ -174,7 +178,7 @@ func (p *Probe) attach() error {
 	}
 	p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[processExecProgramName], nil)
+	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
 	}
@@ -185,6 +189,31 @@ func (p *Probe) attach() error {
 		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
 	}
 	p.links = append(p.links, l)
+
+	// attach to sched_process_fork tracepoint, first try the version with BTF
+	if prog, ok := p.c.Programs[processForkProgramName]; ok {
+		// attach to raw tracepoint (we have BTF)
+		l, err = link.AttachRawTracepoint((link.RawTracepointOptions{
+			Program: prog,
+			Name:    "sched_process_fork",
+		}))
+		if err != nil {
+			return fmt.Errorf("can't attach raw tracepoint sched_process_fork: %w", err)
+		}
+		p.links = append(p.links, l)
+	} else {
+		// fallback to tracepoint without BTF
+		prog, ok := p.c.Programs[processForkNoBTFProgramName]
+		if !ok {
+			return errors.New("sched_process_fork program not found")
+		}
+
+		l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sched_process_fork (no BTF): %w", err)
+		}
+		p.links = append(p.links, l)
+	}
 
 	return nil
 }
@@ -286,6 +315,17 @@ LOOP:
 			switch event.Type {
 			case common.EventTypeExec:
 				p.consumer.Add(int(event.Pid))
+			case common.EventTypeFork:
+				if !p.btfDisabled {
+					// BTF is enabled, we can trust the event is a relevant process being created
+					p.consumer.Add(int(event.Pid))
+				} else {
+					// BTF is disabled, we need to check if the PID is a process or thread
+					isProcess, err := proc.IsProcess(int(event.Pid))
+					if err == nil && isProcess {
+						p.consumer.Add(int(event.Pid))
+					}
+				}
 			case common.EventTypeExit:
 				p.consumer.Remove(int(event.Pid))
 			default:

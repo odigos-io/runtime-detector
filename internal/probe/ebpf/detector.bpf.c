@@ -3,6 +3,7 @@
 
 #ifndef NO_BTF
 #include "bpf_core_read.h"
+#include "bpf_tracing.h"
 #endif
 
 char __license[] SEC("license") = "Dual MIT/GPL";
@@ -57,6 +58,7 @@ typedef enum {
     UNDEFINED = 0,
     PROCESS_EXEC = 1,
     PROCESS_EXIT = 2,
+    PROCESS_FORK = 3,
 } process_event_type_t;
 
 typedef struct process_event {
@@ -177,7 +179,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
             found_relevant = true;
             break;
         }
-	}
+    }
 
     if (!found_relevant) {
         return 0;
@@ -220,6 +222,104 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
+/*
+sched_process_fork is located inside the kernel_clone function in the kernel.
+it is common to the syscalls: fork, vfork, clone, and clone3.
+*/
+#ifndef NO_BTF
+SEC("raw_tp/sched_process_fork")
+int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *parent, struct task_struct *child) {
+    long ret_code = 0; 
+
+    u32 parent_tgid = (u32)BPF_CORE_READ(parent, tgid);
+    u32 child_tgid = (u32)BPF_CORE_READ(child, tgid);
+
+    if (parent_tgid == child_tgid) {
+        // this is a thread, not a process
+        return 0;
+    }
+
+    u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);
+    u32 child_pid = (u32)BPF_CORE_READ(child, pid);
+
+    // filter only relevant pids based on the parent
+    // check if that this clone/fork is called from a process we are tracking
+    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
+    if (found == NULL) {
+        return 0;
+    }
+
+    pids_in_ns_t pids = {0};
+
+    ret_code = get_pid_for_configured_ns(child, &pids);
+    if (ret_code < 0) {
+        bpf_printk("Could not find PID for task: 0x%llx", child_pid);
+        return 0;
+    }
+
+    // track this child pid
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &pids.configured_ns_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
+        return 0;
+    }
+
+    // populate the map with the container pid, so that user space can read it
+    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
+        return 0;
+    }
+
+    process_event_t event = {
+        .type = PROCESS_FORK,
+        .pid = pids.configured_ns_pid,
+    };
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    return 0;
+}
+#else
+SEC("tracepoint/sched/sched_process_fork")
+int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_fork* ctx) {
+    long ret_code = 0;
+    u32 parent_pid = (u32)ctx->parent_pid;
+    u32 child_pid = (u32)ctx->child_pid;
+
+    // check if that this clone/fork is called from a process we are tracking (went through execve)
+    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
+    if (found == NULL) {
+        return 0;
+    }
+
+    // we can't make sure here that the child pid is a new process, and not a thread.
+    // this will be verified in user space (only when BTF is not available)
+
+    u32 unknown_pid = 0;
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &child_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
+        return 0;
+    }
+
+    // populate the map with the container pid, so that user space can read it
+    // since we don't have BTF here, we can't get the last level pid
+    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &child_pid, &unknown_pid, BPF_ANY);
+    if (ret_code != 0) {
+        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
+        return 0;
+    }
+
+    process_event_t event = {
+        .type = PROCESS_FORK,
+        .pid = child_pid,
+    };
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    return 0;
+}
+#endif
+
 SEC("tracepoint/sched/sched_process_exit")
 int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_exec* ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -231,12 +331,17 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         // Only if the thread group ID matched with the PID the process itself exits. If they don't
         // match only a thread of the process stopped and we do not need to report this PID to
         // userspace for further processing.
+#ifdef NO_BTF
+        // we don't have BTF, hence we might have added the PID to the maps in the fork probe
+        bpf_map_delete_elem(&user_pid_to_container_pid,  &pid);
+        bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
+#endif
         return 0;
     }
 
     process_event_t event = { .type = PROCESS_EXIT};
 
-    // look this pid in the map, we will find an entry if this process was found relevant in the exec probe
+    // look this pid in the map, we will find an entry if this process was found relevant in the exec/fork probes
     u32 *selected_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
     if (selected_pid == NULL) {
         // get the pid in the configured namespace
