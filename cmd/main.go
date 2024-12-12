@@ -49,7 +49,7 @@ func main() {
 		close(done)
 	}()
 
-	d, err := detector.NewDetector(ctx, details, opts...)
+	d, err := detector.NewDetector(details, opts...)
 	if err != nil {
 		l.Error("failed to create detector", "error", err)
 		os.Exit(1)
