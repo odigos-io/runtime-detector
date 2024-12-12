@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	cmd "github.com/odigos-io/runtime-detector/internal/cmd_filter"
 	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
-	cmd "github.com/odigos-io/runtime-detector/internal/cmd_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -73,26 +73,26 @@ type detectorConfig struct {
 
 // DetectorOption applies a configuration option to [Detector].
 type DetectorOption interface {
-	apply(context.Context, detectorConfig) (detectorConfig, error)
+	apply(detectorConfig) (detectorConfig, error)
 }
 
-type fnOpt func(context.Context, detectorConfig) (detectorConfig, error)
+type fnOpt func(detectorConfig) (detectorConfig, error)
 
-func (o fnOpt) apply(ctx context.Context, c detectorConfig) (detectorConfig, error) { return o(ctx, c) }
+func (o fnOpt) apply(c detectorConfig) (detectorConfig, error) { return o(c) }
 
 // NewDetector creates a new [Detector] instance, which can be used to detect process creation and exit events.
 // The detector will use the provided output channel to send the detected events.
-// Once [Run] is called, the detector will start monitoring the system for process events.
+// Once [Detector.Run] is called, the detector will start monitoring the system for process events.
 //
 // The detector can be configured using the provided [DetectorOption]s.
 //
 // The output channel will be closed when the detector stops.
-func NewDetector(ctx context.Context, output chan<- ProcessEvent, opts ...DetectorOption) (*Detector, error) {
+func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector, error) {
 	if output == nil {
 		return nil, errors.New("output channel is nil")
 	}
 
-	c, err := newConfig(ctx, opts)
+	c, err := newConfig(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func newDefaultLogger() *slog.Logger {
 	}))
 }
 
-func newConfig(ctx context.Context, opts []DetectorOption) (detectorConfig, error) {
+func newConfig(opts []DetectorOption) (detectorConfig, error) {
 	var (
 		c   detectorConfig
 		err error
@@ -256,7 +256,7 @@ func newConfig(ctx context.Context, opts []DetectorOption) (detectorConfig, erro
 	for _, opt := range opts {
 		if opt != nil {
 			var e error
-			c, e = opt.apply(ctx, c)
+			c, e = opt.apply(c)
 			err = errors.Join(err, e)
 		}
 	}
@@ -277,7 +277,7 @@ func newConfig(ctx context.Context, opts []DetectorOption) (detectorConfig, erro
 }
 
 func WithLogger(l *slog.Logger) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.logger = l
 		return c, nil
 	})
@@ -286,7 +286,7 @@ func WithLogger(l *slog.Logger) DetectorOption {
 // WithMinDuration returns a [DetectorOption] that configures a [Detector] to use the specified minimum duration
 // for a process to be considered active, the default is 1 second. This is used to filter out short-lived processes.
 func WithMinDuration(d time.Duration) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.minDuration = d
 		return c, nil
 	})
@@ -296,7 +296,7 @@ func WithMinDuration(d time.Duration) DetectorOption {
 // variables in the output (in case they are set for the process). If no environment keys are provided, no environment
 // variables will be included in the output.
 func WithEnvironments(envs ...string) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		envsMap := make(map[string]struct{})
 		for _, e := range envs {
 			envsMap[e] = struct{}{}
@@ -312,7 +312,7 @@ func WithEnvironments(envs ...string) DetectorOption {
 // If the value is not empty, the detector will only report events for processes that have an environment variable
 // with the specified prefix.
 func WithEnvPrefixFilter(prefix string) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.envPrefixFilter = prefix
 		return c, nil
 	})
@@ -321,7 +321,7 @@ func WithEnvPrefixFilter(prefix string) DetectorOption {
 // WithCmdsToFilter returns a [DetectorOption] that configures a [Detector] to filter out processes with the specified
 // commands. If a process has a command that matches one of the provided commands, it will be filtered out and not reported.
 func WithCmdsToFilter(cmds ...string) DetectorOption {
-	return fnOpt(func(_ context.Context, c detectorConfig) (detectorConfig, error) {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.cmdsToFilter = cmds
 		return c, nil
 	})
