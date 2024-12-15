@@ -84,7 +84,7 @@ func (o fnOpt) apply(c detectorConfig) (detectorConfig, error) { return o(c) }
 // The detector will use the provided output channel to send the detected events.
 // Once [Detector.Run] is called, the detector will start monitoring the system for process events.
 //
-// The detector can be configured using the provided [DetectorOption]s.
+// The detector can be configured using the provided [DetectorOption] values.
 //
 // The output channel will be closed when the detector stops.
 func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector, error) {
