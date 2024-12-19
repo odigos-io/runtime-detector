@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	cmd "github.com/odigos-io/runtime-detector/internal/cmd_filter"
 	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
+	exePathFilter "github.com/odigos-io/runtime-detector/internal/exePath_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -64,11 +64,11 @@ type ProcessExecDetails struct {
 }
 
 type detectorConfig struct {
-	logger          *slog.Logger
-	minDuration     time.Duration
-	envs            map[string]struct{}
-	envPrefixFilter string
-	cmdsToFilter    []string
+	logger           *slog.Logger
+	minDuration      time.Duration
+	envs             map[string]struct{}
+	envPrefixFilter  string
+	exePathsToFilter []string
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -102,12 +102,12 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 	// the following steps are used to create the filters chain
 	// 1. ebpf probe generating events and doing basic filtering
 	// 2. duration filter to filter out short-lived processes
-	// 3. cmdFilter filter to check if the process is running in a cmdFilter pod
-	cmdFilter := cmd.NewCmdFilter(c.logger, c.cmdsToFilter, procEvents)
-	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, cmdFilter)
+	// 3. exePathFilter filter to check if the process is running in a exePathFilter pod
+	exePathFilter := exePathFilter.NewExePathFilter(c.logger, c.exePathsToFilter, procEvents)
+	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, exePathFilter)
 	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter})
 
-	filters := []common.ProcessesFilter{durationFilter, cmdFilter}
+	filters := []common.ProcessesFilter{durationFilter, exePathFilter}
 
 	d := &Detector{
 		p:               p,
@@ -318,11 +318,11 @@ func WithEnvPrefixFilter(prefix string) DetectorOption {
 	})
 }
 
-// WithCmdsToFilter returns a [DetectorOption] that configures a [Detector] to filter out processes with the specified
-// commands. If a process has a command that matches one of the provided commands, it will be filtered out and not reported.
-func WithCmdsToFilter(cmds ...string) DetectorOption {
+// WithExePathsToFilter returns a [DetectorOption] that configures a [Detector] to filter out processes which run
+// the specified executable. If a process runs an executable that matches one of the provided paths, it will be filtered out and not reported.
+func WithExePathsToFilter(paths ...string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
-		c.cmdsToFilter = cmds
+		c.exePathsToFilter = paths
 		return c, nil
 	})
 }
