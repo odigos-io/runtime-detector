@@ -15,7 +15,7 @@ var (
 	}
 
 	// for testing purposes, we can override these functions
-	GetExeNameFunc = proc.GetExeNameAndLink
+	GetExePathFunc = proc.GetExePathAndLink
 )
 
 // exePathFilter is a filter that filters processes based on the command they are running.
@@ -29,7 +29,7 @@ type exePathFilter struct {
 	// exePaths is a set of commands that we want filter
 	exePaths map[string]struct{}
 
-	// filteredPIDs is a set of pids that we have filtered based on the exe name,
+	// filteredPIDs is a set of pids that we have filtered based on the exe path,
 	// we need to keep track of these pids, so we know not to report the exit event when the process exits.
 	filteredPIDs map[int]struct{}
 }
@@ -54,21 +54,21 @@ func NewExePathFilter(l *slog.Logger, exePaths []string, output chan<- common.PI
 }
 
 func (k *exePathFilter) Add(pid int) {
-	_, exeName := GetExeNameFunc(pid)
-	if exeName == "" {
+	_, exePath := GetExePathFunc(pid)
+	if exePath == "" {
 		// this error can happen for 2 reasons:
 		// 1. the process has already exited, this is a transient error.
 		// 2. the pid reported is invalid, this can happen if BTF is not enabled, and the detector is running inside a container
 		//    (KinD fir example), in this case, all the process events will get this error, since the pid reported by eBPF,
 		//    is not valid in for user space running in a container.
-		k.l.Warn("failed to get exe name, not reporting event", "pid", pid)
+		k.l.Warn("failed to get exe path, not reporting event", "pid", pid)
 		return
 	}
 
-	if _, ok := k.exePaths[exeName]; ok {
-		k.l.Debug("exe name filter skipping pid",
+	if _, ok := k.exePaths[exePath]; ok {
+		k.l.Debug("exe path filter skipping pid",
 			"pid", pid,
-			"exe name", exeName,
+			"exe path", exePath,
 		)
 		k.filteredPIDs[pid] = struct{}{}
 		return
@@ -78,7 +78,7 @@ func (k *exePathFilter) Add(pid int) {
 
 	k.l.Debug("exe path filter received pid",
 		"pid", pid,
-		"exe name", exeName,
+		"exe path", exePath,
 	)
 }
 
