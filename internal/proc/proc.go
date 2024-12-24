@@ -209,14 +209,14 @@ func parseEnvironments(r io.Reader, keys map[string]struct{}) (map[string]string
 // file that was used to start the process.
 // For instance, if a process was started from /usr/bin/python,
 // the exe symbolic link in that process's /proc directory will point to /usr/bin/python.
-func GetExeNameAndLink(pid int) (link, exeName string) {
+func GetExePathAndLink(pid int) (link, exePath string) {
 	link = procFile(pid, "exe")
-	exeName, err := os.Readlink(link)
+	exePath, err := os.Readlink(link)
 	if err != nil {
 		// Read link may fail if target process runs not as root
 		return "", ""
 	}
-	return link, exeName
+	return link, exePath
 }
 
 // IsProcess checks if the given PID corresponds to a process or a thread.

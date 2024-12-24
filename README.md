@@ -36,7 +36,7 @@ import (
 				l.Info("detected new process",
 					"pid", d.PID,
 					"cmd", d.ExecDetails.CmdLine,
-					"exeName", d.ExecDetails.ExeName,
+					"exePath", d.ExecDetails.ExePath,
 					"exeLink", d.ExecDetails.ExeLink,
 					"envs", d.ExecDetails.Environments,
 					"container PID", d.ExecDetails.ContainerProcessID,

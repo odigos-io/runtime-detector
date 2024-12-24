@@ -48,8 +48,8 @@ type ProcessEvent struct {
 }
 
 type ProcessExecDetails struct {
-	// Name of the executable: (e.g. /usr/bin/bash, /usr/local/bin/node)
-	ExeName string
+	// Path of the executable: (e.g. /usr/bin/bash, /usr/local/bin/node)
+	ExePath string
 	// Symbolic link to the executable, this can be used to read the binary's metadata
 	ExeLink string
 	// Command line used to launch the process, including arguments (e.g. java -jar /app/frontend.jar)
@@ -133,7 +133,7 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 		return nil, err
 	}
 
-	link, exeName := proc.GetExeNameAndLink(pid)
+	link, exePath := proc.GetExePathAndLink(pid)
 
 	cPID, err := d.p.GetContainerPID(pid)
 	if err != nil {
@@ -144,7 +144,7 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 	}
 
 	return &ProcessExecDetails{
-		ExeName:            exeName,
+		ExePath:            exePath,
 		ExeLink:            link,
 		CmdLine:            cmd,
 		Environments:       env,
