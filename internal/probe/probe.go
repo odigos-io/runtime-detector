@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
+	// "os"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -168,54 +168,55 @@ func (p *Probe) setEnvPrefixFilter() error {
 }
 
 func (p *Probe) attach() error {
-	if p.c == nil {
-		return errors.New("no eBPF collection loaded")
-	}
+	return errors.New("some nasty error!!")
+	// if p.c == nil {
+	// 	return errors.New("no eBPF collection loaded")
+	// }
 
-	reader, err := perf.NewReader(p.c.Maps[eventsMapName], PerfBufferDefaultSizeInPages*os.Getpagesize())
-	if err != nil {
-		return fmt.Errorf("can't create perf reader: %w", err)
-	}
-	p.reader = reader
+	// reader, err := perf.NewReader(p.c.Maps[eventsMapName], PerfBufferDefaultSizeInPages*os.Getpagesize())
+	// if err != nil {
+	// 	return fmt.Errorf("can't create perf reader: %w", err)
+	// }
+	// p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
-	if err != nil {
-		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
-	}
-	p.links = append(p.links, l)
+	// l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
+	// if err != nil {
+	// 	return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+	// }
+	// p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
-	if err != nil {
-		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
-	}
-	p.links = append(p.links, l)
+	// l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
+	// if err != nil {
+	// 	return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
+	// }
+	// p.links = append(p.links, l)
 
-	// attach to sched_process_fork tracepoint, first try the version with BTF
-	if prog, ok := p.c.Programs[processForkProgramName]; ok {
-		// attach to raw tracepoint (we have BTF)
-		l, err = link.AttachRawTracepoint((link.RawTracepointOptions{
-			Program: prog,
-			Name:    "sched_process_fork",
-		}))
-		if err != nil {
-			return fmt.Errorf("can't attach raw tracepoint sched_process_fork: %w", err)
-		}
-		p.links = append(p.links, l)
-	} else {
-		// fallback to tracepoint without BTF
-		prog, ok := p.c.Programs[processForkNoBTFProgramName]
-		if !ok {
-			return errors.New("sched_process_fork program not found")
-		}
+	// // attach to sched_process_fork tracepoint, first try the version with BTF
+	// if prog, ok := p.c.Programs[processForkProgramName]; ok {
+	// 	// attach to raw tracepoint (we have BTF)
+	// 	l, err = link.AttachRawTracepoint((link.RawTracepointOptions{
+	// 		Program: prog,
+	// 		Name:    "sched_process_fork",
+	// 	}))
+	// 	if err != nil {
+	// 		return fmt.Errorf("can't attach raw tracepoint sched_process_fork: %w", err)
+	// 	}
+	// 	p.links = append(p.links, l)
+	// } else {
+	// 	// fallback to tracepoint without BTF
+	// 	prog, ok := p.c.Programs[processForkNoBTFProgramName]
+	// 	if !ok {
+	// 		return errors.New("sched_process_fork program not found")
+	// 	}
 
-		l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
-		if err != nil {
-			return fmt.Errorf("can't attach probe sched_process_fork (no BTF): %w", err)
-		}
-		p.links = append(p.links, l)
-	}
+	// 	l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
+	// 	if err != nil {
+	// 		return fmt.Errorf("can't attach probe sched_process_fork (no BTF): %w", err)
+	// 	}
+	// 	p.links = append(p.links, l)
+	// }
 
-	return nil
+	// return nil
 }
 
 func (p *Probe) Close() error {
