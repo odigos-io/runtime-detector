@@ -54,7 +54,14 @@ func TestLoad(t *testing.T) {
 		assert.NoError(t, err)
 		defer p.Close()
 
-		err = p.TrackPIDs([]int{1, 2, 3, 4, 5})
+		pids := []int{1, 2, 3, 4, 5}
+		err = p.TrackPIDs(pids)
 		assert.NoError(t, err)
+
+		for i, pid := range pids {
+			containerPID, err := p.GetContainerPID(pid)
+			assert.NoError(t, err)
+			assert.Equal(t, i+1, containerPID)
+		}
 	})
 }

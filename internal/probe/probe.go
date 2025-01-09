@@ -272,7 +272,18 @@ func (p *Probe) TrackPIDs(pids []int) error {
 	}
 	_, err := m.BatchUpdate(keys, make([]uint32, len(pids)), &ebpf.BatchOptions{})
 	if err != nil {
-		return fmt.Errorf("can't batch update PIDs: %w", err)
+		if errors.Is(err, ebpf.ErrNotSupported) {
+			// Batch update is supported only on kernels >= 5.6
+			// Fallback to single updates
+			for i, pid := range pids {
+				err = m.Update(uint32(pid), keys[i], ebpf.MapUpdateFlags(0))
+				if err != nil {
+					return fmt.Errorf("can't update single entry in PIDs map: %w", err)
+				}
+			}
+		} else {
+			return fmt.Errorf("can't batch update PIDs: %w", err)
+		}
 	}
 	return nil
 }
