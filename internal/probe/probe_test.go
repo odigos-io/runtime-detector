@@ -45,4 +45,16 @@ func TestLoad(t *testing.T) {
 		defer p.Close()
 		assert.ErrorContains(t, err, "env prefix filter is too long")
 	})
+
+	t.Run("load with tracked PIDs", func(t *testing.T) {
+		p := &Probe{
+			logger: slog.Default(),
+		}
+		err := p.load(uint32(4026532561))
+		assert.NoError(t, err)
+		defer p.Close()
+
+		err = p.TrackPIDs([]int{1, 2, 3, 4, 5})
+		assert.NoError(t, err)
+	})
 }
