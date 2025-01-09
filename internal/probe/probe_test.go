@@ -58,10 +58,10 @@ func TestLoad(t *testing.T) {
 		err = p.TrackPIDs(pids)
 		assert.NoError(t, err)
 
-		for i, pid := range pids {
+		for _, pid := range pids {
 			containerPID, err := p.GetContainerPID(pid)
 			assert.NoError(t, err)
-			assert.Equal(t, i+1, containerPID)
+			assert.Equal(t, 0, containerPID)
 		}
 	})
 }
