@@ -30,12 +30,12 @@ func NewDurationFilter(logger *slog.Logger, d time.Duration, consumer common.Pro
 	}
 }
 
-func (df *durationFilter) launchProcessCountdown(pid int) *process {
+func (df *durationFilter) launchProcessCountdown(pid int, eventType common.EventType) *process {
 	return &process{
 		t: time.AfterFunc(df.liveDuration, func() {
 			df.logger.Debug("process has been active for the specified duration", "pid", pid)
 			// add the pid to the consumer
-			df.consumer.Add(pid)
+			df.consumer.Add(pid, eventType)
 			// stop tracking the pid
 			df.mu.Lock()
 			delete(df.procs, pid)
@@ -44,7 +44,7 @@ func (df *durationFilter) launchProcessCountdown(pid int) *process {
 	}
 }
 
-func (df *durationFilter) Add(pid int) {
+func (df *durationFilter) Add(pid int, eventType common.EventType) {
 	df.mu.Lock()
 	defer df.mu.Unlock()
 
@@ -55,13 +55,13 @@ func (df *durationFilter) Add(pid int) {
 
 	if p, ok := df.procs[pid]; ok {
 		df.logger.Debug("pid already exists")
-		p.t.Reset(df.liveDuration)
 		// the pid is already being tracked, we just re-scheduled the output
-		return
+		// first stop the timer and then re-launce it with the updated eventType
+		p.t.Stop()
 	}
 
 	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", pid)
-	df.procs[pid] = df.launchProcessCountdown(pid)
+	df.procs[pid] = df.launchProcessCountdown(pid, eventType)
 }
 
 func (df *durationFilter) Remove(pid int) {

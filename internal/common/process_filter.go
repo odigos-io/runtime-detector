@@ -5,7 +5,7 @@ package common
 type ProcessesFilter interface {
 	// Add is called when a new process should be inspected by the filter,
 	// or after some changes in the process state occurred which the next filter should be aware of.
-	Add(pid int)
+	Add(pid int, eventType EventType)
 	// Remove is called when a process should be removed from the filter.
 	// If the process in not tracked by the filter, this method should be a no-op.
 	Remove(pid int)

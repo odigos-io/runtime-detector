@@ -30,9 +30,15 @@ type Detector struct {
 type ProcessEventType int
 
 const (
-	ProcessExecEvent ProcessEventType = iota
-	ProcessExitEvent
+	ProcessExecEvent     ProcessEventType = ProcessEventType(common.EventTypeExec)
+	ProcessExitEvent     ProcessEventType = ProcessEventType(common.EventTypeExit)
+	ProcessForkEvent     ProcessEventType = ProcessEventType(common.EventTypeFork)
+	ProcessFileOpenEvent ProcessEventType = ProcessEventType(common.EventTypeFileOpen)
 )
+
+func (pe ProcessEventType) String() string {
+	return common.EventType(pe).String()
+}
 
 type ProcessEvent struct {
 	// EventType is the type of the process event
@@ -42,7 +48,10 @@ type ProcessEvent struct {
 	// it will be from the container namespace. if the process is running in the host namespace,
 	// this PID is the PID of the process in the host namespace.
 	PID int
-	// ExecDetails is the details of the process execution event, it is only set for the Exec event
+	// ExecDetails is the details of the process execution event, it is set for the events:
+	// - ProcessExecEvent
+	// - ProcessForkEvent
+	// - ProcessFileOpenEvent
 	// for other events, it is nil
 	ExecDetails *ProcessExecDetails
 }
@@ -69,6 +78,7 @@ type detectorConfig struct {
 	envs             map[string]struct{}
 	envPrefixFilter  string
 	exePathsToFilter []string
+	filesOpenTrigger []string
 }
 
 // DetectorOption applies a configuration option to [Detector].
@@ -105,7 +115,7 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 	// 3. exePathFilter filter to check if the process is running in a exePathFilter pod
 	exePathFilter := exePathFilter.NewExePathFilter(c.logger, c.exePathsToFilter, procEvents)
 	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, exePathFilter)
-	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter})
+	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter, OpenFilesToTrack: c.filesOpenTrigger})
 
 	filters := []common.ProcessesFilter{durationFilter, exePathFilter}
 
@@ -156,21 +166,18 @@ func (d *Detector) procEventLoop() {
 	for e := range d.procEvents {
 		pe := ProcessEvent{PID: e.Pid}
 		switch e.Type {
-		case common.EventTypeExec:
+		case common.EventTypeExec, common.EventTypeFileOpen, common.EventTypeFork:
 			execDetails, err := d.processExecDetails(e.Pid)
 			if err != nil {
 				d.l.Error("failed to get process details", "pid", e.Pid, "error", err)
 				continue
 			}
 			pe.ExecDetails = execDetails
-			pe.EventType = ProcessExecEvent
+			pe.EventType = ProcessEventType(e.Type)
 			d.output <- pe
 		case common.EventTypeExit:
 			pe.EventType = ProcessExitEvent
 			d.output <- pe
-		case common.EventTypeFork:
-			// these events should be handled internally by the probe, and should not be seen by the detector
-			d.l.Error("unexpected fork event", "pid", e.Pid)
 		default:
 			d.l.Error("unknown event type", "type", e.Type)
 		}
@@ -216,7 +223,7 @@ func (d *Detector) Run(ctx context.Context) error {
 
 	// feed the PIDs from the initial scan to the first filter
 	for _, pid := range pids {
-		d.filters[0].Add(pid)
+		d.filters[0].Add(pid, common.EventTypeExec)
 	}
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled
@@ -323,6 +330,16 @@ func WithEnvPrefixFilter(prefix string) DetectorOption {
 func WithExePathsToFilter(paths ...string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.exePathsToFilter = paths
+		return c, nil
+	})
+}
+
+// WithFilesOpenTrigger returns a [DetectorOption] that configures a [Detector] to report events when a process opens one of the specified files.
+// If a process opens a file that matches one of the provided paths, an event will be reported.
+// This would only trigger an event if the process is tracked according to some other criteria (for example has a relevant environment variable).
+func WithFilesOpenTrigger(files ...string) DetectorOption {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
+		c.filesOpenTrigger = files
 		return c, nil
 	})
 }

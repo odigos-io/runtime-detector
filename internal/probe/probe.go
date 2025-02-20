@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"unsafe"
 
@@ -29,8 +30,9 @@ type Probe struct {
 	// the consumer of process events supplied by the probe
 	consumer common.ProcessesFilter
 
-	envPrefixFilter string
-	btfDisabled     bool
+	envPrefixFilter  string
+	openFilesToTrack []string
+	btfDisabled      bool
 }
 
 type processEvent struct {
@@ -48,6 +50,10 @@ const (
 	processExitProgramName      = "tracepoint__sched__sched_process_exit"
 	pidToContainerPIDMapName    = "user_pid_to_container_pid"
 	envPrefixMapName            = "env_prefix"
+
+	fileOpenProgramName = "tracepoint__syscalls__sys_enter_openat"
+	filenameMapName     = "files_to_track"
+	numbFilesConstName  = "num_files_to_track"
 )
 
 type Config struct {
@@ -56,13 +62,18 @@ type Config struct {
 	// the event will be reported.
 	// If the value is empty, no filtering will be done based on the environment variables.
 	EnvPrefixFilter string
+
+	// OpenFilesToTrack is a list of files that should be tracked by the probe.
+	// For the tracked process, any open operation on these files will be reported.
+	OpenFilesToTrack []string
 }
 
 func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
 	return &Probe{
-		logger:          logger,
-		consumer:        f,
-		envPrefixFilter: config.EnvPrefixFilter,
+		logger:           logger,
+		consumer:         f,
+		envPrefixFilter:  config.EnvPrefixFilter,
+		openFilesToTrack: config.OpenFilesToTrack,
 	}
 }
 
@@ -84,9 +95,10 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
-func createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Collection, error) {
+func createCollection(spec *ebpf.CollectionSpec, ns uint32, numFiles uint8) (*ebpf.Collection, error) {
 	err := spec.RewriteConstants(map[string]interface{}{
 		"configured_pid_ns_inode": ns,
+		numbFilesConstName:        numFiles,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("can't rewrite constants: %w", err)
@@ -114,8 +126,18 @@ func (p *Probe) load(ns uint32) error {
 		return err
 	}
 
-	c, err := createCollection(spec, ns)
-	if err != nil && errors.Is(err, ebpf.ErrNotSupported) {
+	numFilesToTrack := uint8(0)
+	if len(p.openFilesToTrack) > 0 && len(p.openFilesToTrack) <= math.MaxUint8 {
+		numFilesToTrack = uint8(len(p.openFilesToTrack))
+	}
+
+	c, err := createCollection(spec, ns, numFilesToTrack)
+	if err != nil {
+		if !errors.Is(err, ebpf.ErrNotSupported) {
+			return fmt.Errorf("can't create eBPF collection: %w", err)
+		}
+
+		// BTF is not supported, fallback to eBPF without BTF
 		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
 		p.btfDisabled = true
 		spec, err = loadBpf_no_btf()
@@ -123,7 +145,7 @@ func (p *Probe) load(ns uint32) error {
 			return err
 		}
 
-		c, err = createCollection(spec, ns)
+		c, err = createCollection(spec, ns, numFilesToTrack)
 		if err != nil {
 			return fmt.Errorf("can't create eBPF collection: %w", err)
 		}
@@ -135,6 +157,13 @@ func (p *Probe) load(ns uint32) error {
 	if err != nil {
 		return fmt.Errorf("can't set env prefix filter: %w", err)
 	}
+
+	// set filenames to track by writing them to the map
+	err = p.setFilenamesToTrack()
+	if err != nil {
+		return fmt.Errorf("can't set filenames to track: %w", err)
+	}
+
 	p.logger.Info("eBPF probes loaded", "env prefix filter", p.envPrefixFilter)
 	return nil
 }
@@ -142,10 +171,6 @@ func (p *Probe) load(ns uint32) error {
 const maxEnvPrefixLength = int(unsafe.Sizeof(bpfEnvPrefixT{}.Prefix))
 
 func (p *Probe) setEnvPrefixFilter() error {
-	if p.c == nil {
-		return errors.New("no eBPF collection loaded")
-	}
-
 	m, ok := p.c.Maps[envPrefixMapName]
 	if !ok {
 		return errors.New("env_prefix map not found")
@@ -163,6 +188,34 @@ func (p *Probe) setEnvPrefixFilter() error {
 
 	if err := m.Put(key, value); err != nil {
 		return fmt.Errorf("can't put env prefix in map: %w", err)
+	}
+	return nil
+}
+
+const maxFilenameLength = int(unsafe.Sizeof(bpfFilenameT{}.Buf))
+
+func (p *Probe) setFilenamesToTrack() error {
+	m, ok := p.c.Maps[filenameMapName]
+	if !ok {
+		return errors.New("files_to_track map not found")
+	}
+
+	if len(p.openFilesToTrack) > int(m.MaxEntries()) {
+		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.openFilesToTrack), m.MaxEntries())
+	}
+
+	for i, filename := range p.openFilesToTrack {
+		if len(filename) > maxFilenameLength {
+			return fmt.Errorf("filename is too long: provide length is %d, max allowed length is %d", len(filename), maxFilenameLength)
+		}
+
+		key := uint32(i)
+		value := bpfFilenameT{Len: uint64(len(filename))}
+		copy(value.Buf[:], filename)
+
+		if err := m.Put(key, value); err != nil {
+			return fmt.Errorf("can't put filename in map: %w", err)
+		}
 	}
 	return nil
 }
@@ -211,6 +264,15 @@ func (p *Probe) attach() error {
 		l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
 		if err != nil {
 			return fmt.Errorf("can't attach probe sched_process_fork (no BTF): %w", err)
+		}
+		p.links = append(p.links, l)
+	}
+
+	if len(p.openFilesToTrack) > 0 {
+		// attach to openat syscall
+		l, err = link.Tracepoint("syscalls", "sys_enter_openat", p.c.Programs[fileOpenProgramName], nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sys_enter_openat: %w", err)
 		}
 		p.links = append(p.links, l)
 	}
@@ -328,17 +390,21 @@ LOOP:
 
 			switch event.Type {
 			case common.EventTypeExec:
-				p.consumer.Add(int(event.Pid))
+				p.consumer.Add(int(event.Pid), common.EventTypeExec)
 			case common.EventTypeFork:
 				if !p.btfDisabled {
 					// BTF is enabled, we can trust the event is a relevant process being created
-					p.consumer.Add(int(event.Pid))
+					p.consumer.Add(int(event.Pid), common.EventTypeFork)
 				} else {
 					// BTF is disabled, we need to check if the PID is a process or thread
 					isProcess, err := proc.IsProcess(int(event.Pid))
 					if err == nil && isProcess {
-						p.consumer.Add(int(event.Pid))
+						p.consumer.Add(int(event.Pid), common.EventTypeFork)
 					}
+				}
+			case common.EventTypeFileOpen:
+				if len(p.openFilesToTrack) > 0 {
+					p.consumer.Add(int(event.Pid), common.EventTypeFileOpen)
 				}
 			case common.EventTypeExit:
 				p.consumer.Remove(int(event.Pid))
