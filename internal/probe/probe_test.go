@@ -106,6 +106,13 @@ func TestLoad(t *testing.T) {
 		defer p.Close()
 		assert.NoError(t, err)
 
+		v, ok := p.c.Variables[numbFilesConstName]
+		assert.True(t, ok)
+		valFromVar := uint8(0)
+		err = v.Get(&valFromVar)
+		assert.NoError(t, err)
+		assert.Equal(t, uint8(2), valFromVar)
+
 		m := p.c.Maps[filenameMapName]
 		assert.NotNil(t, m)
 

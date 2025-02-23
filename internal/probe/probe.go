@@ -54,6 +54,8 @@ const (
 	fileOpenProgramName = "tracepoint__syscalls__sys_enter_openat"
 	filenameMapName     = "files_to_track"
 	numbFilesConstName  = "num_files_to_track"
+
+	userNamespaceInodeConstName = "configured_pid_ns_inode"
 )
 
 type Config struct {
@@ -95,13 +97,41 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
-func createCollection(spec *ebpf.CollectionSpec, ns uint32, numFiles uint8) (*ebpf.Collection, error) {
-	err := spec.RewriteConstants(map[string]interface{}{
-		"configured_pid_ns_inode": ns,
-		numbFilesConstName:        numFiles,
-	})
+func setConsts(spec *ebpf.CollectionSpec, ns uint32, numFiles uint8) error {
+	v, ok := spec.Variables[userNamespaceInodeConstName]
+	if !ok {
+		return fmt.Errorf("constant %s not found", userNamespaceInodeConstName)
+	}
+	if !v.Constant() {
+		return fmt.Errorf("variable %s is not a constant", userNamespaceInodeConstName)
+	}
+	if err := v.Set(ns); err != nil {
+		return fmt.Errorf("rewriting constant %s: %w", userNamespaceInodeConstName, err)
+	}
+
+	v, ok = spec.Variables[numbFilesConstName]
+	if !ok {
+		return fmt.Errorf("constant %s not found", numbFilesConstName)
+	}
+	if !v.Constant() {
+		return fmt.Errorf("variable %s is not a constant", numbFilesConstName)
+	}
+	if err := v.Set(numFiles); err != nil {
+		return fmt.Errorf("rewriting constant %s: %w", numbFilesConstName, err)
+	}
+
+	return nil
+}
+
+func createCollection(spec *ebpf.CollectionSpec, ns uint32, numFilesToTrack uint8) (*ebpf.Collection, error) {
+	err := setConsts(spec, ns, numFilesToTrack)
 	if err != nil {
 		return nil, fmt.Errorf("can't rewrite constants: %w", err)
+	}
+
+	if numFilesToTrack == 0 {
+		// if there are no files to track, avoid loading the openat program
+		delete(spec.Programs, fileOpenProgramName)
 	}
 
 	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})

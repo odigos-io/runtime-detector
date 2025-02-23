@@ -57,9 +57,10 @@ func loadBpf_no_btfObjects(obj interface{}, opts *ebpf.CollectionOptions) error 
 type bpf_no_btfSpecs struct {
 	bpf_no_btfProgramSpecs
 	bpf_no_btfMapSpecs
+	bpf_no_btfVariableSpecs
 }
 
-// bpf_no_btfSpecs contains programs before they are loaded into the kernel.
+// bpf_no_btfProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfProgramSpecs struct {
@@ -80,12 +81,21 @@ type bpf_no_btfMapSpecs struct {
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
 }
 
+// bpf_no_btfVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type bpf_no_btfVariableSpecs struct {
+	ConfiguredPidNsInode *ebpf.VariableSpec `ebpf:"configured_pid_ns_inode"`
+	NumFilesToTrack      *ebpf.VariableSpec `ebpf:"num_files_to_track"`
+}
+
 // bpf_no_btfObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_no_btfObjects struct {
 	bpf_no_btfPrograms
 	bpf_no_btfMaps
+	bpf_no_btfVariables
 }
 
 func (o *bpf_no_btfObjects) Close() error {
@@ -114,6 +124,14 @@ func (m *bpf_no_btfMaps) Close() error {
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
 	)
+}
+
+// bpf_no_btfVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_no_btfVariables struct {
+	ConfiguredPidNsInode *ebpf.Variable `ebpf:"configured_pid_ns_inode"`
+	NumFilesToTrack      *ebpf.Variable `ebpf:"num_files_to_track"`
 }
 
 // bpf_no_btfPrograms contains all programs after they have been loaded into the kernel.
