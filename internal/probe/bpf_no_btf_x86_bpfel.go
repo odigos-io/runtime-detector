@@ -17,6 +17,11 @@ type bpf_no_btfEnvPrefixT struct {
 	Prefix [128]uint8
 }
 
+type bpf_no_btfFilenameT struct {
+	Len uint64
+	Buf [128]uint8
+}
+
 // loadBpf_no_btf returns the embedded CollectionSpec for bpf_no_btf.
 func loadBpf_no_btf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_Bpf_no_btfBytes)
@@ -52,15 +57,17 @@ func loadBpf_no_btfObjects(obj interface{}, opts *ebpf.CollectionOptions) error 
 type bpf_no_btfSpecs struct {
 	bpf_no_btfProgramSpecs
 	bpf_no_btfMapSpecs
+	bpf_no_btfVariableSpecs
 }
 
-// bpf_no_btfSpecs contains programs before they are loaded into the kernel.
+// bpf_no_btfProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfProgramSpecs struct {
 	TracepointSchedSchedProcessExit  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSchedSchedProcessFork  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysEnterOpenat *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_openat"`
 }
 
 // bpf_no_btfMapSpecs contains maps before they are loaded into the kernel.
@@ -69,8 +76,17 @@ type bpf_no_btfProgramSpecs struct {
 type bpf_no_btfMapSpecs struct {
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
+	FilesToTrack          *ebpf.MapSpec `ebpf:"files_to_track"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
+}
+
+// bpf_no_btfVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type bpf_no_btfVariableSpecs struct {
+	ConfiguredPidNsInode *ebpf.VariableSpec `ebpf:"configured_pid_ns_inode"`
+	NumFilesToTrack      *ebpf.VariableSpec `ebpf:"num_files_to_track"`
 }
 
 // bpf_no_btfObjects contains all objects after they have been loaded into the kernel.
@@ -79,6 +95,7 @@ type bpf_no_btfMapSpecs struct {
 type bpf_no_btfObjects struct {
 	bpf_no_btfPrograms
 	bpf_no_btfMaps
+	bpf_no_btfVariables
 }
 
 func (o *bpf_no_btfObjects) Close() error {
@@ -94,6 +111,7 @@ func (o *bpf_no_btfObjects) Close() error {
 type bpf_no_btfMaps struct {
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
+	FilesToTrack          *ebpf.Map `ebpf:"files_to_track"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
 }
@@ -102,9 +120,18 @@ func (m *bpf_no_btfMaps) Close() error {
 	return _Bpf_no_btfClose(
 		m.EnvPrefix,
 		m.Events,
+		m.FilesToTrack,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
 	)
+}
+
+// bpf_no_btfVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_no_btfVariables struct {
+	ConfiguredPidNsInode *ebpf.Variable `ebpf:"configured_pid_ns_inode"`
+	NumFilesToTrack      *ebpf.Variable `ebpf:"num_files_to_track"`
 }
 
 // bpf_no_btfPrograms contains all programs after they have been loaded into the kernel.
@@ -114,6 +141,7 @@ type bpf_no_btfPrograms struct {
 	TracepointSchedSchedProcessExit  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSchedSchedProcessFork  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysEnterOpenat *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_openat"`
 }
 
 func (p *bpf_no_btfPrograms) Close() error {
@@ -121,6 +149,7 @@ func (p *bpf_no_btfPrograms) Close() error {
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSchedSchedProcessFork,
 		p.TracepointSyscallsSysEnterExecve,
+		p.TracepointSyscallsSysEnterOpenat,
 	)
 }
 

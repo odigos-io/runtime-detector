@@ -19,6 +19,10 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_ENV_PREFIX_LEN        (128)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
 
+#define MAX_PATHNAME_LEN          (128)
+#define MAX_PATHNAME_MASK         ((MAX_PATHNAME_LEN) - 1)
+#define MAX_PATHS_TO_TRACK        (8)
+
 typedef struct env_prefix {
     u64 len;
     u8 prefix[MAX_ENV_PREFIX_LEN];
@@ -30,6 +34,22 @@ struct {
     __type(value, env_prefix_t);
     __uint(max_entries, 1);
 } env_prefix SEC(".maps");
+
+typedef struct {
+    u64 len;
+    u8  buf[MAX_PATHNAME_LEN];
+} filename_t;
+
+// injected by the user space code, indicating how many paths are configured
+// must be smaller than MAX_PATHS_TO_TRACK
+volatile const u8 num_files_to_track = 0;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, u32);
+    __type(value, filename_t);
+    __uint(max_entries, MAX_PATHS_TO_TRACK);
+} files_to_track SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -59,6 +79,7 @@ typedef enum {
     PROCESS_EXEC = 1,
     PROCESS_EXIT = 2,
     PROCESS_FORK = 3,
+    PROCESS_FILE_OPEN = 4,
 } process_event_type_t;
 
 typedef struct process_event {
@@ -95,6 +116,24 @@ static __always_inline bool is_env_prefix_match(char *env, env_prefix_t *configu
     u64 len = configured_prefix->len;
     for (int i = 0; i < (len & MAX_ENV_PREFIX_MASK); i++) {
         if (env[i] != configured_prefix->prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static __always_inline bool compare_filenames(filename_t *opened_filename, filename_t *configured_filename) {
+    if (opened_filename->len != configured_filename->len) {
+        return false;
+    }
+
+    u64 len = configured_filename->len;
+    if (len == 0) {
+        return false;
+    }
+
+    for (int i = 0; i < (len & MAX_PATHNAME_MASK); i++) {
+        if (opened_filename->buf[i] != configured_filename->buf[i]) {
             return false;
         }
     }
@@ -319,6 +358,61 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     return 0;
 }
 #endif
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 tgid = (u32)(pid_tgid >> 32);
+
+    // the open can be called on a different thread than the main one,
+    // hence we use the tgid to find the main pid we are tracking
+    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
+    if (userspace_pid == NULL) {
+        return 0;
+    }
+
+    /*
+    The format of the tracepoint args is:
+        field:int dfd;	offset:16;	size:8;	signed:0;
+        field:const char * filename;	offset:24;	size:8;	signed:0;
+        field:int flags;	offset:32;	size:8;	signed:0;
+        field:umode_t mode;	offset:40;	size:8;	signed:0;
+    */
+
+    const char *filename = (const char *)(ctx->args[1]);
+    filename_t opened_filename = {0};
+
+    long bytes_read = bpf_probe_read_user_str(&opened_filename.buf[0], sizeof(opened_filename.buf), filename);
+    if (bytes_read <= 0) {
+        return 0;
+    }
+
+    // bytes read includes the null terminator
+    opened_filename.len = bytes_read - 1;
+    filename_t *configured_filename = NULL;
+
+    u32 num_paths = num_files_to_track < MAX_PATHS_TO_TRACK ? num_files_to_track : MAX_PATHS_TO_TRACK;
+
+    // go over the configured relevant paths and check if the opened file matches any of them
+    for (u32 i = 0; i < num_paths; i++) {
+        u32 idx = i;
+        configured_filename = bpf_map_lookup_elem(&files_to_track, &idx);
+        if (configured_filename == NULL) {
+            break;
+        }
+
+        if (compare_filenames(&opened_filename, configured_filename)) {
+            process_event_t event = {
+                .type = PROCESS_FILE_OPEN,
+                .pid = *userspace_pid,
+            };
+            bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+            return 0;
+        }
+    }
+
+    return 0;
+}
 
 SEC("tracepoint/sched/sched_process_exit")
 int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_exec* ctx) {

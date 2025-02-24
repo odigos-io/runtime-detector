@@ -12,7 +12,6 @@ import (
 
 func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-		AddSource: true,
 		Level:     slog.LevelInfo,
 	}))
 }
@@ -32,8 +31,9 @@ func main() {
 	go func() {
 		for d := range details {
 			switch d.EventType {
-			case detector.ProcessExecEvent:
+			case detector.ProcessExecEvent, detector.ProcessFileOpenEvent, detector.ProcessForkEvent:
 				l.Info("detected new process",
+					"eventType", d.EventType.String(),
 					"pid", d.PID,
 					"cmd", d.ExecDetails.CmdLine,
 					"exePath", d.ExecDetails.ExePath,

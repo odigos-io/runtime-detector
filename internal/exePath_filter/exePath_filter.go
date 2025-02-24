@@ -53,7 +53,7 @@ func NewExePathFilter(l *slog.Logger, exePaths []string, output chan<- common.PI
 	}
 }
 
-func (k *exePathFilter) Add(pid int) {
+func (k *exePathFilter) Add(pid int, eventType common.EventType) {
 	_, exePath := GetExePathFunc(pid)
 	if exePath == "" {
 		// this error can happen for 2 reasons:
@@ -74,7 +74,7 @@ func (k *exePathFilter) Add(pid int) {
 		return
 	}
 
-	k.output <- common.PIDEvent{Pid: pid, Type: common.EventTypeExec}
+	k.output <- common.PIDEvent{Pid: pid, Type: eventType}
 
 	k.l.Debug("exe path filter received pid",
 		"pid", pid,

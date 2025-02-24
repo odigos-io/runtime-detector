@@ -8,6 +8,7 @@ const (
 	EventTypeExec
 	EventTypeExit
 	EventTypeFork
+	EventTypeFileOpen
 )
 
 type PIDEvent struct {
@@ -21,6 +22,10 @@ func (et EventType) String() string {
 		return "exec"
 	case EventTypeExit:
 		return "exit"
+	case EventTypeFork:
+		return "fork"
+	case EventTypeFileOpen:
+		return "file_open"
 	default:
 		return "undefined"
 	}
