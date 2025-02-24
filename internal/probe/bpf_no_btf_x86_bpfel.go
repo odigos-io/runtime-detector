@@ -17,7 +17,12 @@ type bpf_no_btfEnvPrefixT struct {
 	Prefix [128]uint8
 }
 
-type bpf_no_btfFilenameT struct {
+type bpf_no_btfExecFilenameT struct {
+	Len uint64
+	Buf [64]uint8
+}
+
+type bpf_no_btfOpenFilenameT struct {
 	Len uint64
 	Buf [128]uint8
 }
@@ -76,7 +81,8 @@ type bpf_no_btfProgramSpecs struct {
 type bpf_no_btfMapSpecs struct {
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
-	FilesToTrack          *ebpf.MapSpec `ebpf:"files_to_track"`
+	ExecFilesToFilter     *ebpf.MapSpec `ebpf:"exec_files_to_filter"`
+	FilesOpenToTrack      *ebpf.MapSpec `ebpf:"files_open_to_track"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
 }
@@ -86,7 +92,8 @@ type bpf_no_btfMapSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfVariableSpecs struct {
 	ConfiguredPidNsInode *ebpf.VariableSpec `ebpf:"configured_pid_ns_inode"`
-	NumFilesToTrack      *ebpf.VariableSpec `ebpf:"num_files_to_track"`
+	NumExecPathsToFilter *ebpf.VariableSpec `ebpf:"num_exec_paths_to_filter"`
+	NumOpenPathsToTrack  *ebpf.VariableSpec `ebpf:"num_open_paths_to_track"`
 }
 
 // bpf_no_btfObjects contains all objects after they have been loaded into the kernel.
@@ -111,7 +118,8 @@ func (o *bpf_no_btfObjects) Close() error {
 type bpf_no_btfMaps struct {
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
-	FilesToTrack          *ebpf.Map `ebpf:"files_to_track"`
+	ExecFilesToFilter     *ebpf.Map `ebpf:"exec_files_to_filter"`
+	FilesOpenToTrack      *ebpf.Map `ebpf:"files_open_to_track"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
 }
@@ -120,7 +128,8 @@ func (m *bpf_no_btfMaps) Close() error {
 	return _Bpf_no_btfClose(
 		m.EnvPrefix,
 		m.Events,
-		m.FilesToTrack,
+		m.ExecFilesToFilter,
+		m.FilesOpenToTrack,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
 	)
@@ -131,7 +140,8 @@ func (m *bpf_no_btfMaps) Close() error {
 // It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_no_btfVariables struct {
 	ConfiguredPidNsInode *ebpf.Variable `ebpf:"configured_pid_ns_inode"`
-	NumFilesToTrack      *ebpf.Variable `ebpf:"num_files_to_track"`
+	NumExecPathsToFilter *ebpf.Variable `ebpf:"num_exec_paths_to_filter"`
+	NumOpenPathsToTrack  *ebpf.Variable `ebpf:"num_open_paths_to_track"`
 }
 
 // bpf_no_btfPrograms contains all programs after they have been loaded into the kernel.
