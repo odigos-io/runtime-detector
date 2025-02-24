@@ -19,7 +19,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
 #define MAX_ENV_VARS              (128)
 
-// The maximum length of the path we are looking for in the openat syscall
+// The maximum length of the executable pathname to filter out.
 #define MAX_EXEC_PATHNAME_LEN     (64)
 #define MAX_EXEC_PATHNAME_MASK    ((MAX_EXEC_PATHNAME_LEN) - 1)
 #define MAX_EXEC_PATHS_TO_FILTER  (32)
@@ -51,12 +51,12 @@ typedef struct {
     u8  buf[MAX_EXEC_PATHNAME_LEN];
 } exec_filename_t;
 
-// injected by the user space code, indicating how many paths are configured
-// must be smaller than MAX_OPEN_PATHS_TO_TRACK
+// injected by the user space code, indicating how many paths are configured to track in the open probe,
+// must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
 volatile const u8 num_open_paths_to_track = 0;
 
 // injected by the user space code, indicating how many paths are configured
-// to be ignored in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
+// to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
 volatile const u8 num_exec_paths_to_filter = 0;
 
 // Used to store the paths configured to be tracked for relevant processes when open occurs.
@@ -526,7 +526,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();
         ret = get_pid_for_configured_ns(task, &pids);
         if (ret < 0) {
-            bpf_printk("process exit: Could not find PID for task return code: %ld", ret);
+            // this might happen for processes we are not tracking, and that are not in the configured namespace
             return 0;
         }
 #endif
