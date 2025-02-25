@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -30,9 +29,10 @@ type Probe struct {
 	// the consumer of process events supplied by the probe
 	consumer common.ProcessesFilter
 
-	envPrefixFilter  string
-	openFilesToTrack []string
-	btfDisabled      bool
+	envPrefixFilter   string
+	openFilesToTrack  []string
+	execFilesToFilter []string
+	btfDisabled       bool
 }
 
 type processEvent struct {
@@ -51,9 +51,12 @@ const (
 	pidToContainerPIDMapName    = "user_pid_to_container_pid"
 	envPrefixMapName            = "env_prefix"
 
-	fileOpenProgramName = "tracepoint__syscalls__sys_enter_openat"
-	filenameMapName     = "files_to_track"
-	numbFilesConstName  = "num_files_to_track"
+	fileOpenProgramName          = "tracepoint__syscalls__sys_enter_openat"
+	openTrackingFilenameMapName  = "files_open_to_track"
+	numOpenPathsToTrackConstName = "num_open_paths_to_track"
+
+	execFilesToFilterMapName      = "exec_files_to_filter"
+	numExecFilesToIgnoreConstName = "num_exec_paths_to_filter"
 
 	userNamespaceInodeConstName = "configured_pid_ns_inode"
 )
@@ -68,14 +71,20 @@ type Config struct {
 	// OpenFilesToTrack is a list of files that should be tracked by the probe.
 	// For the tracked process, any open operation on these files will be reported.
 	OpenFilesToTrack []string
+
+	// ExecFilesToFilter is a list of full paths to executables that should be ignored by the probe.
+	// If a process is executed by one of these files, the event will not be reported.
+	// removing duplication is in the responsibility of the caller.
+	ExecFilesToFilter []string
 }
 
 func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
 	return &Probe{
-		logger:           logger,
-		consumer:         f,
-		envPrefixFilter:  config.EnvPrefixFilter,
-		openFilesToTrack: config.OpenFilesToTrack,
+		logger:            logger,
+		consumer:          f,
+		envPrefixFilter:   config.EnvPrefixFilter,
+		openFilesToTrack:  config.OpenFilesToTrack,
+		execFilesToFilter: config.ExecFilesToFilter,
 	}
 }
 
@@ -97,7 +106,7 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
-func setConsts(spec *ebpf.CollectionSpec, ns uint32, numFiles uint8) error {
+func (p *Probe) setSpecConsts(spec *ebpf.CollectionSpec, ns uint32) error {
 	v, ok := spec.Variables[userNamespaceInodeConstName]
 	if !ok {
 		return fmt.Errorf("constant %s not found", userNamespaceInodeConstName)
@@ -109,28 +118,45 @@ func setConsts(spec *ebpf.CollectionSpec, ns uint32, numFiles uint8) error {
 		return fmt.Errorf("rewriting constant %s: %w", userNamespaceInodeConstName, err)
 	}
 
-	v, ok = spec.Variables[numbFilesConstName]
+	v, ok = spec.Variables[numOpenPathsToTrackConstName]
 	if !ok {
-		return fmt.Errorf("constant %s not found", numbFilesConstName)
+		return fmt.Errorf("constant %s not found", numOpenPathsToTrackConstName)
 	}
 	if !v.Constant() {
-		return fmt.Errorf("variable %s is not a constant", numbFilesConstName)
+		return fmt.Errorf("variable %s is not a constant", numOpenPathsToTrackConstName)
 	}
-	if err := v.Set(numFiles); err != nil {
-		return fmt.Errorf("rewriting constant %s: %w", numbFilesConstName, err)
+	if len(p.openFilesToTrack) > math.MaxUint8 {
+		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.openFilesToTrack), math.MaxUint8)
+	}
+	if err := v.Set(uint8(len(p.openFilesToTrack))); err != nil {
+		return fmt.Errorf("rewriting constant %s: %w", numOpenPathsToTrackConstName, err)
+	}
+
+	v, ok = spec.Variables[numExecFilesToIgnoreConstName]
+	if !ok {
+		return fmt.Errorf("constant %s not found", numExecFilesToIgnoreConstName)
+	}
+	if !v.Constant() {
+		return fmt.Errorf("variable %s is not a constant", numExecFilesToIgnoreConstName)
+	}
+	if len(p.execFilesToFilter) > math.MaxUint8 {
+		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.execFilesToFilter), math.MaxUint8)
+	}
+	if err := v.Set(uint8(len(p.execFilesToFilter))); err != nil {
+		return fmt.Errorf("rewriting constant %s: %w", numExecFilesToIgnoreConstName, err)
 	}
 
 	return nil
 }
 
-func createCollection(spec *ebpf.CollectionSpec, ns uint32, numFilesToTrack uint8) (*ebpf.Collection, error) {
-	err := setConsts(spec, ns, numFilesToTrack)
+func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Collection, error) {
+	err := p.setSpecConsts(spec, ns)
 	if err != nil {
 		return nil, fmt.Errorf("can't rewrite constants: %w", err)
 	}
 
-	if numFilesToTrack == 0 {
-		// if there are no files to track, avoid loading the openat program
+	if len(p.openFilesToTrack) == 0 {
+		// if there are no files to track for open, avoid loading the openat program
 		delete(spec.Programs, fileOpenProgramName)
 	}
 
@@ -156,12 +182,7 @@ func (p *Probe) load(ns uint32) error {
 		return err
 	}
 
-	numFilesToTrack := uint8(0)
-	if len(p.openFilesToTrack) > 0 && len(p.openFilesToTrack) <= math.MaxUint8 {
-		numFilesToTrack = uint8(len(p.openFilesToTrack))
-	}
-
-	c, err := createCollection(spec, ns, numFilesToTrack)
+	c, err := p.createCollection(spec, ns)
 	if err != nil {
 		if !errors.Is(err, ebpf.ErrNotSupported) {
 			return fmt.Errorf("can't create eBPF collection: %w", err)
@@ -175,78 +196,30 @@ func (p *Probe) load(ns uint32) error {
 			return err
 		}
 
-		c, err = createCollection(spec, ns, numFilesToTrack)
+		c, err = p.createCollection(spec, ns)
 		if err != nil {
 			return fmt.Errorf("can't create eBPF collection: %w", err)
 		}
 	}
 
 	p.c = c
-	// set env prefix filter by writing it to the map
+
 	err = p.setEnvPrefixFilter()
 	if err != nil {
 		return fmt.Errorf("can't set env prefix filter: %w", err)
 	}
 
-	// set filenames to track by writing them to the map
-	err = p.setFilenamesToTrack()
+	err = p.setFilenamesToTrackWhenOpened()
 	if err != nil {
-		return fmt.Errorf("can't set filenames to track: %w", err)
+		return fmt.Errorf("can't set filenames to track for open: %w", err)
+	}
+
+	err = p.setExecFilenamesToIgnore()
+	if err != nil {
+		return fmt.Errorf("can't set exec filenames to ignore: %w", err)
 	}
 
 	p.logger.Info("eBPF probes loaded", "env prefix filter", p.envPrefixFilter)
-	return nil
-}
-
-const maxEnvPrefixLength = int(unsafe.Sizeof(bpfEnvPrefixT{}.Prefix))
-
-func (p *Probe) setEnvPrefixFilter() error {
-	m, ok := p.c.Maps[envPrefixMapName]
-	if !ok {
-		return errors.New("env_prefix map not found")
-	}
-
-	prefix := p.envPrefixFilter
-
-	if len(prefix) > maxEnvPrefixLength {
-		return fmt.Errorf("env prefix filter is too long: provide length is %d, max allowed length is %d", len(prefix), maxEnvPrefixLength)
-	}
-
-	key := uint32(0)
-	value := bpfEnvPrefixT{Len: uint64(len(prefix))}
-	copy(value.Prefix[:], prefix)
-
-	if err := m.Put(key, value); err != nil {
-		return fmt.Errorf("can't put env prefix in map: %w", err)
-	}
-	return nil
-}
-
-const maxFilenameLength = int(unsafe.Sizeof(bpfFilenameT{}.Buf))
-
-func (p *Probe) setFilenamesToTrack() error {
-	m, ok := p.c.Maps[filenameMapName]
-	if !ok {
-		return errors.New("files_to_track map not found")
-	}
-
-	if len(p.openFilesToTrack) > int(m.MaxEntries()) {
-		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.openFilesToTrack), m.MaxEntries())
-	}
-
-	for i, filename := range p.openFilesToTrack {
-		if len(filename) > maxFilenameLength {
-			return fmt.Errorf("filename is too long: provide length is %d, max allowed length is %d", len(filename), maxFilenameLength)
-		}
-
-		key := uint32(i)
-		value := bpfFilenameT{Len: uint64(len(filename))}
-		copy(value.Buf[:], filename)
-
-		if err := m.Put(key, value); err != nil {
-			return fmt.Errorf("can't put filename in map: %w", err)
-		}
-	}
 	return nil
 }
 

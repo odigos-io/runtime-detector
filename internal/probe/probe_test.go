@@ -7,11 +7,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 func repeatedString(length int, s string) string {
-	b := make([]byte, length * len(s))
+	b := make([]byte, length*len(s))
 	for i := range b {
-		b[i] = s[i % len(s)]
+		b[i] = s[i%len(s)]
 	}
 	return string(b)
 }
@@ -28,7 +27,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("load with env prefix", func(t *testing.T) {
 		p := &Probe{
-			logger: slog.Default(),
+			logger:          slog.Default(),
 			envPrefixFilter: "TEST",
 		}
 		err := p.load(uint32(4026532561))
@@ -50,7 +49,7 @@ func TestLoad(t *testing.T) {
 
 	t.Run("load with too long env prefix", func(t *testing.T) {
 		p := &Probe{
-			logger: slog.Default(),
+			logger:          slog.Default(),
 			envPrefixFilter: repeatedString(100, "TEST"),
 		}
 		err := p.load(uint32(4026532561))
@@ -77,9 +76,9 @@ func TestLoad(t *testing.T) {
 		}
 	})
 
-	t.Run("load with too long file name", func(t *testing.T) {
+	t.Run("load with too long file name to track for open", func(t *testing.T) {
 		p := &Probe{
-			logger: slog.Default(),
+			logger:           slog.Default(),
 			openFilesToTrack: []string{repeatedString(129, "a")},
 		}
 		err := p.load(uint32(4026532561))
@@ -87,30 +86,65 @@ func TestLoad(t *testing.T) {
 		assert.ErrorContains(t, err, "filename is too long")
 	})
 
-	t.Run("load with too many file names", func(t *testing.T) {
+	t.Run("load with too long executable filename to filter", func(t *testing.T) {
 		p := &Probe{
-			logger: slog.Default(),
+			logger:            slog.Default(),
+			execFilesToFilter: []string{repeatedString(65, "a")},
+		}
+		err := p.load(uint32(4026532561))
+		defer p.Close()
+		assert.ErrorContains(t, err, "executable filename is too long")
+	})
+
+	t.Run("load with too many file name for open tracking", func(t *testing.T) {
+		p := &Probe{
+			logger:           slog.Default(),
 			openFilesToTrack: make([]string, 9),
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
-		assert.ErrorContains(t, err, "too many files to track")
+		assert.ErrorContains(t, err, "too many files to track for open")
+	})
+
+	t.Run("load with too many executable files to filter", func(t *testing.T) {
+		p := &Probe{
+			logger:            slog.Default(),
+			execFilesToFilter: make([]string, 33),
+		}
+		err := p.load(uint32(4026532561))
+		defer p.Close()
+		assert.ErrorContains(t, err, "too many executable files to ignore")
 	})
 
 	t.Run("load with multiple file names", func(t *testing.T) {
 		p := &Probe{
-			logger: slog.Default(),
-			openFilesToTrack: []string{"/var/file1.so", "/var/file2.so"},
+			logger:            slog.Default(),
+			openFilesToTrack:  []string{"/var/file1.so", "/var/file2.so"},
+			execFilesToFilter: []string{"/usr/bin/bash", "/usr/tini", "/usr/bin/sh"},
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
 		assert.NoError(t, err)
 
-		m := p.c.Maps[filenameMapName]
+		m := p.c.Maps[openTrackingFilenameMapName]
 		assert.NotNil(t, m)
 
 		for i, file := range p.openFilesToTrack {
-			value := bpfFilenameT{}
+			value := bpfOpenFilenameT{}
+			err = m.Lookup(uint32(i), &value)
+			assert.NoError(t, err)
+			assert.Equal(t, uint64(len(file)), value.Len)
+
+			filename := make([]byte, len(file))
+			copy(filename, value.Buf[:])
+			assert.Equal(t, []byte(file), filename)
+		}
+
+		m = p.c.Maps[execFilesToFilterMapName]
+		assert.NotNil(t, m)
+
+		for i, file := range p.execFilesToFilter {
+			value := bpfExecFilenameT{}
 			err = m.Lookup(uint32(i), &value)
 			assert.NoError(t, err)
 			assert.Equal(t, uint64(len(file)), value.Len)

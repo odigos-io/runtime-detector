@@ -23,7 +23,17 @@ func main() {
 		detector.WithLogger(l),
 		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME", "ODIGOS_CONTAINER_NAME", "ODIGOS_WORKLOAD_NAMESPACE"),
 		detector.WithEnvPrefixFilter("ODIGOS_POD_NAME"),
-		detector.WithExePathsToFilter("/usr/bin/bash", "/bin/bash", "/bin/sh", "/usr/bin/sh", "/bin/busybox", "/usr/bin/dash"),
+		detector.WithExePathsToFilter(
+			"/usr/bin/bash",
+			"/usr/local/sbin/bash",
+			"/usr/local/bin/bash",
+			"/bin/bash",
+			"/bin/sh",
+			"/usr/sbin/bash",
+			"/usr/bin/sh",
+			"/bin/busybox",
+			"/usr/bin/dash",
+		),
 	}
 
 	details := make(chan detector.ProcessEvent)

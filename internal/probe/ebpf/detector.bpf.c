@@ -8,7 +8,6 @@
 
 char __license[] SEC("license") = "Dual MIT/GPL";
 
-#define MAX_ENV_VARS              (128)
 #define MAX_NS_FOR_PID            (8)
 
 // This max is only for processes we track.
@@ -18,10 +17,17 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 // The maximum length of the prefix we are looking for in the environment variables.
 #define MAX_ENV_PREFIX_LEN        (128)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
+#define MAX_ENV_VARS              (128)
 
-#define MAX_PATHNAME_LEN          (128)
-#define MAX_PATHNAME_MASK         ((MAX_PATHNAME_LEN) - 1)
-#define MAX_PATHS_TO_TRACK        (8)
+// The maximum length of the executable pathname to filter out.
+#define MAX_EXEC_PATHNAME_LEN     (64)
+#define MAX_EXEC_PATHNAME_MASK    ((MAX_EXEC_PATHNAME_LEN) - 1)
+#define MAX_EXEC_PATHS_TO_FILTER  (32)
+
+// The maximum length of the path we are looking for in the openat syscall
+#define MAX_OPEN_PATHNAME_LEN     (128)
+#define MAX_OPEN_PATHNAME_MASK    ((MAX_OPEN_PATHNAME_LEN) - 1)
+#define MAX_OPEN_PATHS_TO_TRACK   (8)
 
 typedef struct env_prefix {
     u64 len;
@@ -37,19 +43,37 @@ struct {
 
 typedef struct {
     u64 len;
-    u8  buf[MAX_PATHNAME_LEN];
-} filename_t;
+    u8  buf[MAX_OPEN_PATHNAME_LEN];
+} open_filename_t;
+
+typedef struct {
+    u64 len;
+    u8  buf[MAX_EXEC_PATHNAME_LEN];
+} exec_filename_t;
+
+// injected by the user space code, indicating how many paths are configured to track in the open probe,
+// must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
+volatile const u8 num_open_paths_to_track = 0;
 
 // injected by the user space code, indicating how many paths are configured
-// must be smaller than MAX_PATHS_TO_TRACK
-volatile const u8 num_files_to_track = 0;
+// to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
+volatile const u8 num_exec_paths_to_filter = 0;
 
+// Used to store the paths configured to be tracked for relevant processes when open occurs.
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, u32);
-    __type(value, filename_t);
-    __uint(max_entries, MAX_PATHS_TO_TRACK);
-} files_to_track SEC(".maps");
+    __type(value, open_filename_t);
+    __uint(max_entries, MAX_OPEN_PATHS_TO_TRACK);
+} files_open_to_track SEC(".maps");
+
+// Used to store the executable paths configured to be ignored in the exec probe.
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, u32);
+    __type(value, exec_filename_t);
+    __uint(max_entries, MAX_EXEC_PATHS_TO_FILTER);
+} exec_files_to_filter SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -122,7 +146,7 @@ static __always_inline bool is_env_prefix_match(char *env, env_prefix_t *configu
     return true;
 }
 
-static __always_inline bool compare_filenames(filename_t *opened_filename, filename_t *configured_filename) {
+static __always_inline bool compare_open_filenames(open_filename_t *opened_filename, open_filename_t *configured_filename) {
     if (opened_filename->len != configured_filename->len) {
         return false;
     }
@@ -132,8 +156,26 @@ static __always_inline bool compare_filenames(filename_t *opened_filename, filen
         return false;
     }
 
-    for (int i = 0; i < (len & MAX_PATHNAME_MASK); i++) {
+    for (int i = 0; i < (len & MAX_OPEN_PATHNAME_MASK); i++) {
         if (opened_filename->buf[i] != configured_filename->buf[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static __always_inline bool compare_exec_filenames(exec_filename_t *executed_filename, exec_filename_t *configured_filename) {
+    if (executed_filename->len != configured_filename->len) {
+        return false;
+    }
+
+    u64 len = configured_filename->len;
+    if (len == 0) {
+        return false;
+    }
+
+    for (int i = 0; i < (len & MAX_EXEC_PATHNAME_MASK); i++) {
+        if (executed_filename->buf[i] != configured_filename->buf[i]) {
             return false;
         }
     }
@@ -182,6 +224,35 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
 }
 #endif
 
+static __always_inline bool is_executable_ignored(const char *filename) {
+    exec_filename_t executed_filename = {0};
+    long bytes_read = bpf_probe_read_user_str(&executed_filename.buf[0], sizeof(executed_filename.buf), filename);
+    if (bytes_read <= 0) {
+        // if we fail to read the filename, should we assume we need to ignore it?
+        return true;
+    }
+
+    // bytes read includes the null terminator
+    executed_filename.len = bytes_read - 1;
+    exec_filename_t *configured_filename = NULL;
+
+    u32 num_paths = num_exec_paths_to_filter < MAX_EXEC_PATHS_TO_FILTER ? num_exec_paths_to_filter : MAX_EXEC_PATHS_TO_FILTER;
+    u32 idx = 0;
+    for (u32 i = 0; i < num_paths; i++) {
+        idx = i;
+        configured_filename = bpf_map_lookup_elem(&exec_files_to_filter, &idx);
+        if (configured_filename == NULL) {
+            break;
+        }
+        if (compare_exec_filenames(&executed_filename, configured_filename)) {
+            // this is an executable we should ignore
+            return true;
+        }
+    }
+
+    return false;
+}
+
 SEC("tracepoint/syscalls/sys_enter_execve")
 int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     /*
@@ -220,10 +291,18 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         }
     }
 
+    // only proceed if the prefix is found in the environment variables
     if (!found_relevant) {
         return 0;
     }
 
+    // check if the executed file is in the list of files to ignore
+    const char *filename = (const char *)(ctx->args[0]);
+    if (is_executable_ignored(filename)) {
+        return 0;
+    }
+
+    // from this point, we know that the process is relevant and we should track it and notify user space
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     pids_in_ns_t pids = {0};
@@ -380,7 +459,7 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     */
 
     const char *filename = (const char *)(ctx->args[1]);
-    filename_t opened_filename = {0};
+    open_filename_t opened_filename = {0};
 
     long bytes_read = bpf_probe_read_user_str(&opened_filename.buf[0], sizeof(opened_filename.buf), filename);
     if (bytes_read <= 0) {
@@ -389,19 +468,19 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
 
     // bytes read includes the null terminator
     opened_filename.len = bytes_read - 1;
-    filename_t *configured_filename = NULL;
+    open_filename_t *configured_filename = NULL;
 
-    u32 num_paths = num_files_to_track < MAX_PATHS_TO_TRACK ? num_files_to_track : MAX_PATHS_TO_TRACK;
+    u32 num_paths = num_open_paths_to_track < MAX_OPEN_PATHS_TO_TRACK ? num_open_paths_to_track : MAX_OPEN_PATHS_TO_TRACK;
 
     // go over the configured relevant paths and check if the opened file matches any of them
     for (u32 i = 0; i < num_paths; i++) {
         u32 idx = i;
-        configured_filename = bpf_map_lookup_elem(&files_to_track, &idx);
+        configured_filename = bpf_map_lookup_elem(&files_open_to_track, &idx);
         if (configured_filename == NULL) {
             break;
         }
 
-        if (compare_filenames(&opened_filename, configured_filename)) {
+        if (compare_open_filenames(&opened_filename, configured_filename)) {
             process_event_t event = {
                 .type = PROCESS_FILE_OPEN,
                 .pid = *userspace_pid,
@@ -447,7 +526,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();
         ret = get_pid_for_configured_ns(task, &pids);
         if (ret < 0) {
-            bpf_printk("process exit: Could not find PID for task return code: %ld", ret);
+            // this might happen for processes we are not tracking, and that are not in the configured namespace
             return 0;
         }
 #endif

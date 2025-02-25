@@ -5,12 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
-	exePathFilter "github.com/odigos-io/runtime-detector/internal/exePath_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -18,13 +18,14 @@ import (
 const defaultMinDuration = (1 * time.Second)
 
 type Detector struct {
-	p               *probe.Probe
-	filters         []common.ProcessesFilter
-	l               *slog.Logger
-	procEvents      chan common.PIDEvent
-	output          chan<- ProcessEvent
-	envKeys         map[string]struct{}
-	envPrefixFilter string
+	p                *probe.Probe
+	filters          []common.ProcessesFilter
+	l                *slog.Logger
+	procEvents       chan common.PIDEvent
+	output           chan<- ProcessEvent
+	envKeys          map[string]struct{}
+	envPrefixFilter  string
+	exePathsToFilter []string
 }
 
 type ProcessEventType int
@@ -81,6 +82,14 @@ type detectorConfig struct {
 	filesOpenTrigger []string
 }
 
+var (
+	// defaultExcludedExePaths are the executables that we do not want to track
+	defaultExcludedExePaths = []string{
+		// it is common for the kubelet/container-runtime to run a process with the command "/pause",
+		"/pause",
+	}
+)
+
 // DetectorOption applies a configuration option to [Detector].
 type DetectorOption interface {
 	apply(detectorConfig) (detectorConfig, error)
@@ -107,26 +116,29 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 		return nil, err
 	}
 
-	procEvents := make(chan common.PIDEvent)
+	procEvents := make(chan common.PIDEvent, 100)
 
 	// the following steps are used to create the filters chain
 	// 1. ebpf probe generating events and doing basic filtering
 	// 2. duration filter to filter out short-lived processes
-	// 3. exePathFilter filter to check if the process is running in a exePathFilter pod
-	exePathFilter := exePathFilter.NewExePathFilter(c.logger, c.exePathsToFilter, procEvents)
-	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, exePathFilter)
-	p := probe.New(c.logger, durationFilter, probe.Config{EnvPrefixFilter: c.envPrefixFilter, OpenFilesToTrack: c.filesOpenTrigger})
+	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, procEvents)
+	p := probe.New(c.logger, durationFilter, probe.Config{
+		EnvPrefixFilter:   c.envPrefixFilter,
+		OpenFilesToTrack:  c.filesOpenTrigger,
+		ExecFilesToFilter: c.exePathsToFilter,
+	})
 
-	filters := []common.ProcessesFilter{durationFilter, exePathFilter}
+	filters := []common.ProcessesFilter{durationFilter}
 
 	d := &Detector{
-		p:               p,
-		filters:         filters,
-		l:               c.logger,
-		procEvents:      procEvents,
-		output:          output,
-		envKeys:         c.envs,
-		envPrefixFilter: c.envPrefixFilter,
+		p:                p,
+		filters:          filters,
+		l:                c.logger,
+		procEvents:       procEvents,
+		output:           output,
+		envKeys:          c.envs,
+		envPrefixFilter:  c.envPrefixFilter,
+		exePathsToFilter: c.exePathsToFilter,
 	}
 
 	return d, nil
@@ -201,7 +213,7 @@ func (d *Detector) Run(ctx context.Context) error {
 	}
 
 	// initial scan of all relevant processes, and send them to the first filter
-	pids, err := proc.AllRelevantProcesses(d.envPrefixFilter)
+	pids, err := proc.AllRelevantProcesses(d.envPrefixFilter, d.exePathsToFilter)
 	if err != nil {
 		return err
 	}
@@ -279,6 +291,15 @@ func newConfig(opts []DetectorOption) (detectorConfig, error) {
 	if c.envs == nil {
 		c.envs = make(map[string]struct{})
 	}
+
+	if c.exePathsToFilter == nil {
+		c.exePathsToFilter = make([]string, 0)
+	}
+
+	// add the default excluded exe paths, and remove duplicates
+	c.exePathsToFilter = append(c.exePathsToFilter, defaultExcludedExePaths...)
+	slices.Sort(c.exePathsToFilter)
+	c.exePathsToFilter = slices.Compact(c.exePathsToFilter)
 
 	return c, err
 }

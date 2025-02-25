@@ -17,16 +17,17 @@ type durationFilter struct {
 	procs        map[int]*process
 	logger       *slog.Logger
 	liveDuration time.Duration
-	consumer     common.ProcessesFilter
 	closed       bool
+
+	output chan<- common.PIDEvent
 }
 
-func NewDurationFilter(logger *slog.Logger, d time.Duration, consumer common.ProcessesFilter) common.ProcessesFilter {
+func NewDurationFilter(logger *slog.Logger, d time.Duration, output chan<- common.PIDEvent) common.ProcessesFilter {
 	return &durationFilter{
 		procs:        make(map[int]*process),
 		logger:       logger,
 		liveDuration: d,
-		consumer:     consumer,
+		output:       output,
 	}
 }
 
@@ -35,7 +36,7 @@ func (df *durationFilter) launchProcessCountdown(pid int, eventType common.Event
 		t: time.AfterFunc(df.liveDuration, func() {
 			df.logger.Debug("process has been active for the specified duration", "pid", pid)
 			// add the pid to the consumer
-			df.consumer.Add(pid, eventType)
+			df.output <- common.PIDEvent{Pid: pid, Type: eventType}
 			// stop tracking the pid
 			df.mu.Lock()
 			delete(df.procs, pid)
@@ -60,7 +61,7 @@ func (df *durationFilter) Add(pid int, eventType common.EventType) {
 		p.t.Stop()
 	}
 
-	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", pid)
+	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", pid, "eventType", eventType.String())
 	df.procs[pid] = df.launchProcessCountdown(pid, eventType)
 }
 
@@ -81,7 +82,7 @@ func (df *durationFilter) Remove(pid int) {
 	}
 
 	// the timer has already fired, we need to notify the consumer about the removal
-	df.consumer.Remove(pid)
+	df.output <- common.PIDEvent{Pid: pid, Type: common.EventTypeExit}
 }
 
 func (df *durationFilter) Close() error {
@@ -93,7 +94,7 @@ func (df *durationFilter) Close() error {
 		delete(df.procs, pid)
 	}
 
-	df.consumer.Close()
+	close(df.output)
 
 	df.closed = true
 	return nil
