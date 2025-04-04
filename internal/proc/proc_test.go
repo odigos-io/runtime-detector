@@ -234,3 +234,23 @@ func TestIsProcess(t *testing.T) {
 		})
 	}
 }
+
+func TestInnerMostPID(t *testing.T) {
+	t.Run("Valid process in container", func(t *testing.T) {
+		r, err := os.Open("./testdata/proc_status_container.txt")
+		assert.NoError(t, err)
+		defer r.Close()
+		pid, err := innerMostPIDFromReader(r)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, pid)
+	})
+
+	t.Run("Valid process in host", func(t *testing.T) {
+		r, err := os.Open("./testdata/proc_status_process.txt")
+		assert.NoError(t, err)
+		defer r.Close()
+		pid, err := innerMostPIDFromReader(r)
+		assert.NoError(t, err)
+		assert.Equal(t, 1402, pid)
+	})
+}

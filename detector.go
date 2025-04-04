@@ -69,7 +69,8 @@ type ProcessExecDetails struct {
 	// with their values. If a given key is not found, it will not be included in the map.
 	Environments map[string]string
 	// the PID of the process in the container namespace, if the process is running in a container.
-	// if BTF is not enabled, this value will be invalid, and should not be used.
+	// if BTF is not enabled, this value might be invalid, and should not be used.
+	// container PID is defined as the inner most PID of the process - i.e the PID in the inner most PID namespace it is running in.
 	ContainerProcessID int
 }
 
@@ -158,11 +159,13 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 	link, exePath := proc.GetExePathAndLink(pid)
 
 	cPID, err := d.p.GetContainerPID(pid)
-	if err != nil {
-		// log the error and continue currently not returning an error
-		// since this might cause if we have an event which is a result of the initial scan
-		// (i.e we missed the exec event)
-		d.l.Error("failed to get container PID", "pid", pid, "error", err)
+	if err != nil || cPID == 0 {
+		// this might happen if we have an event which is a result of the initial scan
+		// (i.e we missed the exec event), try to get the container PID from the /proc file system
+		cPID, err = proc.InnerMostPID(pid)
+		if err != nil {
+			d.l.Error("failed to get container PID", "pid", pid, "error", err)
+		}
 	}
 
 	return &ProcessExecDetails{
