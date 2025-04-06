@@ -266,3 +266,47 @@ func isProcessFromReader(r io.Reader) (bool, error) {
 
 	return tgid == pid, nil
 }
+
+func InnerMostPID(rootPID int) (int, error) {
+	status := procFile(rootPID, "status")
+
+	f, err := os.Open(status)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	return innerMostPIDFromReader(f)
+}
+
+func innerMostPIDFromReader(r io.Reader) (int, error) {
+	// from https://man7.org/linux/man-pages/man5/proc_pid_status.5.html
+	// NStgid Thread group ID (i.e., PID) in each of the PID
+	// namespaces of which pid is a member.  The leftmost
+	// entry shows the value with respect to the PID
+	// namespace of the process that mounted this procfs
+	// (or the root namespace if mounted by the kernel),
+	// followed by the value in successively nested inner
+	// namespaces.  (Since Linux 4.1.)
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "NStgid:") {
+			parts := strings.Fields(line[len("NStgid:"):])
+			if len(parts) == 0 {
+				return 0, fmt.Errorf("no NStgid values found")
+			}
+			// The last value is the inner most PID
+			pid, err := strconv.Atoi(parts[len(parts)-1])
+			if err != nil {
+				return 0, fmt.Errorf("failed to parse NStgid value: %w", err)
+			}
+			return pid, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("failed to read /proc/<pid>/status file %v", err)
+	}
+	return 0, fmt.Errorf("NStgid not found in status file")
+}
