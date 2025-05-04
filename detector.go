@@ -3,6 +3,7 @@ package detector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
@@ -55,6 +56,13 @@ type ProcessEvent struct {
 	// - ProcessFileOpenEvent
 	// for other events, it is nil
 	ExecDetails *ProcessExecDetails
+}
+
+func (pe ProcessEvent) String() string {
+	if pe.ExecDetails != nil {
+		return fmt.Sprintf("%s: PID: %d, ExePath: %s, CmdLine: %s, ContainerPID: %d", pe.EventType, pe.PID, pe.ExecDetails.ExePath, pe.ExecDetails.CmdLine, pe.ExecDetails.ContainerProcessID)
+	}
+	return fmt.Sprintf("%s: PID: %d", pe.EventType, pe.PID)
 }
 
 type ProcessExecDetails struct {
