@@ -141,6 +141,12 @@ func TestDetector(t *testing.T) {
 			// Create and run the test process
 			cmd := exec.Command(tc.exePath, tc.args...)
 			cmd.Env = append(os.Environ(), envVarsToSlice(tc.envVars)...)
+
+			// Capture stdout and stderr
+			var stdout, stderr strings.Builder
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
 			err = cmd.Start()
 			require.NoError(t, err)
 
@@ -153,6 +159,10 @@ func TestDetector(t *testing.T) {
 			// Wait for the process to finish
 			err = cmd.Wait()
 			require.NoError(t, err)
+
+			// Print stdout and stderr
+			t.Logf("stdout: %s", stdout.String())
+			t.Logf("stderr: %s", stderr.String())
 
 			// Give the detector time to process events
 			time.Sleep(100 * time.Millisecond)

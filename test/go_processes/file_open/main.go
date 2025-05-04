@@ -43,4 +43,5 @@ func main() {
 	_, _ = file2.Read(buf)
 	// Keep the program running
 	time.Sleep(1 * time.Second)
+	fmt.Println("Files opened successfully")
 }
