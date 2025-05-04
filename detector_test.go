@@ -58,7 +58,7 @@ func TestDetector(t *testing.T) {
 	testCases := []testCase{
 		{
 			name:         "basic process",
-			envVars:      map[string]string{"TEST_ENV": "value"},
+			envVars:      map[string]string{"USER_ENV": "value"},
 			exePath:      "/usr/bin/sleep",
 			args:         []string{"1"},
 			shouldDetect: true,
@@ -69,7 +69,7 @@ func TestDetector(t *testing.T) {
 		},
 		{
 			name:         "multiple file opens",
-			envVars:      map[string]string{"TEST_ENV": "value"},
+			envVars:      map[string]string{"USER_ENV": "value"},
 			exePath:      filepath.Join(testDir, "file_open"),
 			args:         []string{testFile, testFile2},
 			shouldDetect: true,
@@ -82,7 +82,7 @@ func TestDetector(t *testing.T) {
 		},
 		{
 			name:         "short lived process",
-			envVars:      map[string]string{"TEST_ENV": "value"},
+			envVars:      map[string]string{"USER_ENV": "value"},
 			exePath:      filepath.Join(testDir, "short_lived"),
 			args:         []string{testFile},
 			shouldDetect: false, // Should be filtered out by duration filter
@@ -96,7 +96,7 @@ func TestDetector(t *testing.T) {
 		},
 		{
 			name:         "process executable is filtered",
-			envVars:      map[string]string{"TEST_ENV": "value"},
+			envVars:      map[string]string{"USER_ENV": "value"},
 			exePath:      "/usr/bin/bash",
 			args:         []string{"-c", "echo hello"},
 			shouldDetect: false,
@@ -118,8 +118,8 @@ func TestDetector(t *testing.T) {
 			opts := []DetectorOption{
 				WithMinDuration(100 * time.Millisecond),
 				WithExePathsToFilter("/usr/bin/bash"),
-				WithEnvironments("TEST_ENV"),
-				WithEnvPrefixFilter("TEST_"),
+				WithEnvironments("USER_ENV"),
+				WithEnvPrefixFilter("USER_"),
 				WithFilesOpenTrigger(testFile, testFile2),
 			}
 
