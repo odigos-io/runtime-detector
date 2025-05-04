@@ -17,21 +17,19 @@ func main() {
 
 	// Open first file
 	file1, err := os.Open(file1Path)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		defer file1.Close()
 	}
-	defer file1.Close()
-
+	
 	// Wait a bit before opening second file
 	time.Sleep(500 * time.Millisecond)
 
 	// Open second file
 	file2, err := os.Open(file2Path)
-	if err != nil {
-		panic(err)
+	if err == nil {
+		defer file2.Close()
 	}
-	defer file2.Close()
-
+	
 	// Keep the program running
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 }
