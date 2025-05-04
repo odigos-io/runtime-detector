@@ -173,6 +173,7 @@ func TestDetector(t *testing.T) {
 
 			// Verify we received the expected events
 			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+				t.Logf("received events: %v\n", receivedEvents)
 				return
 			}
 
