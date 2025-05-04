@@ -250,9 +250,15 @@ func isProcessFromReader(r io.Reader) (bool, error) {
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "Tgid:") {
-			fmt.Sscanf(line, "Tgid:\t%d", &tgid)
+			_, err := fmt.Sscanf(line, "Tgid:\t%d", &tgid)
+			if err != nil {
+				return false, fmt.Errorf("failed to parse Tgid: %w", err)
+			}
 		} else if strings.HasPrefix(line, "Pid:") {
-			fmt.Sscanf(line, "Pid:\t%d", &pid)
+			_, err := fmt.Sscanf(line, "Pid:\t%d", &pid)
+			if err != nil {
+				return false, fmt.Errorf("failed to parse Pid: %w", err)
+			}
 		}
 
 		if tgid != 0 && pid != 0 {
