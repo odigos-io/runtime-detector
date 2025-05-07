@@ -274,15 +274,19 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     #pragma unroll
-	for (int i = 1; i < MAX_ENV_VARS; i++) {
-		ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
-		if (ret < 0) {
-			return 0;
+    for (int i = 0; i < MAX_ENV_VARS; i++) {
+        ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
+        if (ret < 0) {
+            return 0;
         }
 
-		ret = bpf_probe_read_user_str(&buf[0], sizeof(buf), argp);
-		if (ret < 0) {
-			return 0;
+        if (argp == NULL) {
+            break;
+        }
+
+        ret = bpf_probe_read_user_str(&buf[0], sizeof(buf), argp);
+        if (ret < 0) {
+            return 0;
         }
 
         if (is_env_prefix_match(&buf[0], configured_prefix)) {
