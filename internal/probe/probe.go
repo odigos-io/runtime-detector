@@ -406,7 +406,6 @@ LOOP:
 					}
 				}
 			case common.EventTypeFileOpen:
-				p.logger.Info("################## file open event", "pid", event.Pid)
 				if len(p.openFilesToTrack) > 0 {
 					p.consumer.Add(int(event.Pid), common.EventTypeFileOpen)
 				}

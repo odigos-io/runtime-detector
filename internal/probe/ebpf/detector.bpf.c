@@ -274,7 +274,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     #pragma unroll
-	for (int i = 0; i < MAX_ENV_VARS; i++) {
+    for (int i = 0; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
         if (ret < 0) {
             return 0;

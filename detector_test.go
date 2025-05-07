@@ -88,7 +88,7 @@ func TestDetector(t *testing.T) {
 			shouldDetect: false, // Should be filtered out by duration filter
 		},
 		{
-			name:         "filtered process",
+			name:         "filtered process by env prefix",
 			envVars:      map[string]string{},
 			exePath:      "/usr/bin/sleep",
 			args:         []string{"1"},
@@ -136,6 +136,8 @@ func TestDetector(t *testing.T) {
 			}()
 
 			// Give the detector time to start
+			// this is required here for testing to avoid race condition in which
+			// the target process performs relevant actions before the detector starts
 			time.Sleep(500 * time.Millisecond)
 
 			// Create and run the test process
