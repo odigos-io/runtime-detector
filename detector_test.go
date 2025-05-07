@@ -119,7 +119,7 @@ func TestDetector(t *testing.T) {
 				WithMinDuration(100 * time.Millisecond),
 				WithExePathsToFilter("/usr/bin/bash"),
 				WithEnvironments("USER_ENV"),
-				WithEnvPrefixFilter("USER_"),
+				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
 			}
 
@@ -136,7 +136,7 @@ func TestDetector(t *testing.T) {
 			}()
 
 			// Give the detector time to start
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 
 			// Create and run the test process
 			cmd := exec.Command(tc.exePath, tc.args...)
