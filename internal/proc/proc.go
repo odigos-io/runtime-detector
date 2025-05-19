@@ -133,17 +133,12 @@ func isProcessRelevantToOdigos(pid int, prefix string) bool {
 	return strings.Contains(string(fileContent), prefix)
 }
 
-func AllRelevantProcesses(envPrefix string, exePathsToFilter []string) ([]int, error) {
+func AllRelevantProcesses(envPrefix string, exePathsToFilter map[string]struct{}) ([]int, error) {
 	d, err := os.Open(procFS)
 	if err != nil {
 		return nil, err
 	}
 	defer d.Close()
-
-	filteredExecMap := make(map[string]struct{})
-	for _, exe := range exePathsToFilter {
-		filteredExecMap[exe] = struct{}{}
-	}
 
 	names, err := d.Readdirnames(-1)
 	if err != nil {
@@ -162,7 +157,7 @@ func AllRelevantProcesses(envPrefix string, exePathsToFilter []string) ([]int, e
 		}
 
 		_, exePath := GetExePathAndLink(int(pid))
-		if _, ok := filteredExecMap[exePath]; ok {
+		if _, ok := exePathsToFilter[exePath]; ok {
 			continue
 		}
 

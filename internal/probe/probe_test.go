@@ -88,8 +88,10 @@ func TestLoad(t *testing.T) {
 
 	t.Run("load with too long executable filename to filter", func(t *testing.T) {
 		p := &Probe{
-			logger:            slog.Default(),
-			execFilesToFilter: []string{repeatedString(65, "a")},
+			logger: slog.Default(),
+			execFilesToFilter: map[string]struct{}{
+				repeatedString(65, "a"): {},
+			},
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
@@ -109,7 +111,7 @@ func TestLoad(t *testing.T) {
 	t.Run("load with too many executable files to filter", func(t *testing.T) {
 		p := &Probe{
 			logger:            slog.Default(),
-			execFilesToFilter: make([]string, 33),
+			execFilesToFilter: make(map[string]struct{}, 33),
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
@@ -118,9 +120,13 @@ func TestLoad(t *testing.T) {
 
 	t.Run("load with multiple file names", func(t *testing.T) {
 		p := &Probe{
-			logger:            slog.Default(),
-			openFilesToTrack:  []string{"/var/file1.so", "/var/file2.so"},
-			execFilesToFilter: []string{"/usr/bin/bash", "/usr/tini", "/usr/bin/sh"},
+			logger:           slog.Default(),
+			openFilesToTrack: []string{"/var/file1.so", "/var/file2.so"},
+			execFilesToFilter: map[string]struct{}{
+				"/usr/bin/bash": {},
+				"/usr/tini":     {},
+				"/usr/bin/sh":   {},
+			},
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
@@ -143,15 +149,17 @@ func TestLoad(t *testing.T) {
 		m = p.c.Maps[execFilesToFilterMapName]
 		assert.NotNil(t, m)
 
-		for i, file := range p.execFilesToFilter {
+		collectedExeFiles := make(map[string]struct{})
+		for i := range len(p.execFilesToFilter) {
 			value := bpfExecFilenameT{}
 			err = m.Lookup(uint32(i), &value)
 			assert.NoError(t, err)
-			assert.Equal(t, uint64(len(file)), value.Len)
 
-			filename := make([]byte, len(file))
+			filename := make([]byte, value.Len)
 			copy(filename, value.Buf[:])
-			assert.Equal(t, []byte(file), filename)
+			collectedExeFiles[string(filename)] = struct{}{}
 		}
+
+		assert.Equal(t, p.execFilesToFilter, collectedExeFiles)
 	})
 }

@@ -31,7 +31,7 @@ type Probe struct {
 
 	envPrefixFilter   string
 	openFilesToTrack  []string
-	execFilesToFilter []string
+	execFilesToFilter map[string]struct{}
 	btfDisabled       bool
 }
 
@@ -75,7 +75,7 @@ type Config struct {
 	// ExecFilesToFilter is a list of full paths to executables that should be ignored by the probe.
 	// If a process is executed by one of these files, the event will not be reported.
 	// removing duplication is in the responsibility of the caller.
-	ExecFilesToFilter []string
+	ExecFilesToFilter map[string]struct{}
 }
 
 func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
