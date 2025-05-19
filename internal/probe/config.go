@@ -69,18 +69,19 @@ func (p *Probe) setExecFilenamesToIgnore() error {
 		return fmt.Errorf("too many executable files to ignore: provided %d, max allowed %d", len(p.execFilesToFilter), m.MaxEntries())
 	}
 
-	for i, filename := range p.execFilesToFilter {
+	key := uint32(0)
+	for filename := range p.execFilesToFilter {
 		if len(filename) > maxExecFileToIgnoreLen {
 			return fmt.Errorf("executable filename is too long: provide length is %d, max allowed length is %d", len(filename), maxExecFileToIgnoreLen)
 		}
 
-		key := uint32(i)
 		value := bpfExecFilenameT{Len: uint64(len(filename))}
 		copy(value.Buf[:], filename)
 
 		if err := m.Put(key, value); err != nil {
 			return fmt.Errorf("can't put filename in map: %w", err)
 		}
+		key++
 	}
 	return nil
 }

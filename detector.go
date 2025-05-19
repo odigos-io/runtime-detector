@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"slices"
 	"sync"
 	"time"
 
@@ -26,7 +25,7 @@ type Detector struct {
 	output           chan<- ProcessEvent
 	envKeys          map[string]struct{}
 	envPrefixFilter  string
-	exePathsToFilter []string
+	exePathsToFilter map[string]struct{}
 }
 
 type ProcessEventType int
@@ -94,7 +93,7 @@ type detectorConfig struct {
 	minDuration      time.Duration
 	envs             map[string]struct{}
 	envPrefixFilter  string
-	exePathsToFilter []string
+	exePathsToFilter map[string]struct{}
 	filesOpenTrigger []string
 }
 
@@ -311,13 +310,13 @@ func newConfig(opts []DetectorOption) (detectorConfig, error) {
 	}
 
 	if c.exePathsToFilter == nil {
-		c.exePathsToFilter = make([]string, 0)
+		c.exePathsToFilter = make(map[string]struct{}, len(defaultExcludedExePaths))
 	}
 
 	// add the default excluded exe paths, and remove duplicates
-	c.exePathsToFilter = append(c.exePathsToFilter, defaultExcludedExePaths...)
-	slices.Sort(c.exePathsToFilter)
-	c.exePathsToFilter = slices.Compact(c.exePathsToFilter)
+	for _, path := range defaultExcludedExePaths {
+		c.exePathsToFilter[path] = struct{}{}
+	}
 
 	return c, err
 }
@@ -368,7 +367,12 @@ func WithEnvPrefixFilter(prefix string) DetectorOption {
 // the specified executable. If a process runs an executable that matches one of the provided paths, it will be filtered out and not reported.
 func WithExePathsToFilter(paths ...string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
-		c.exePathsToFilter = paths
+		pathsMap := make(map[string]struct{}, len(paths))
+		for _, p := range paths {
+			pathsMap[p] = struct{}{}
+		}
+
+		c.exePathsToFilter = pathsMap
 		return c, nil
 	})
 }
