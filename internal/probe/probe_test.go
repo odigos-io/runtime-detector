@@ -110,8 +110,19 @@ func TestLoad(t *testing.T) {
 
 	t.Run("load with too many executable files to filter", func(t *testing.T) {
 		p := &Probe{
-			logger:            slog.Default(),
-			execFilesToFilter: make(map[string]struct{}, 33),
+			logger: slog.Default(),
+			// create map with 33 entries
+			execFilesToFilter: map[string]struct{}{
+				"a": {}, "b": {}, "c": {}, "d": {},
+				"e": {}, "f": {}, "g": {}, "h": {},
+				"i": {}, "j": {}, "k": {}, "l": {},
+				"m": {}, "n": {}, "o": {}, "p": {},
+				"q": {}, "r": {}, "s": {}, "t": {},
+				"u": {}, "v": {}, "w": {}, "x": {},
+				"y": {}, "z": {}, "aa": {}, "bb": {},
+				"cc": {}, "dd": {}, "ee": {}, "ff": {},
+				"gg": {},
+			},
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
