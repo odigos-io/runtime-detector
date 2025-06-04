@@ -13,16 +13,19 @@ import (
 )
 
 type bpfEnvPrefixT struct {
+	_      structs.HostLayout
 	Len    uint64
 	Prefix [128]uint8
 }
 
 type bpfExecFilenameT struct {
+	_   structs.HostLayout
 	Len uint64
 	Buf [64]uint8
 }
 
 type bpfOpenFilenameT struct {
+	_   structs.HostLayout
 	Len uint64
 	Buf [128]uint8
 }
