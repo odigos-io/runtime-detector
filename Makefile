@@ -20,7 +20,7 @@ generate:
 
 .PHONY: docker-generate
 docker-generate:
-	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.5 /bin/sh -c "cd ../app && make generate"
+	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.8 /bin/sh -c "cd ../app && make generate"
 
 .PHONY: build
 build: generate
