@@ -3,6 +3,7 @@ package detector
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,6 +102,13 @@ func TestDetector(t *testing.T) {
 			args:         []string{"-c", "echo hello"},
 			shouldDetect: false,
 		},
+		{
+			name:         "bash script is filtered",
+			envVars:      map[string]string{"USER_ENV": "value"},
+			exePath:      "test/script.sh",
+			args:         []string{},
+			shouldDetect: false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -121,6 +129,9 @@ func TestDetector(t *testing.T) {
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
+				WithLogger(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+					Level: slog.LevelDebug,
+				}))),
 			}
 
 			d, err := NewDetector(events, opts...)

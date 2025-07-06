@@ -22,6 +22,21 @@ generate:
 docker-generate:
 	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.8 /bin/sh -c "cd ../app && make generate"
 
+.PHONY: docker-test
+docker-test:
+	docker run --rm \
+		--privileged \
+		--pid=host \
+		-v $(shell pwd):/app \
+		-v /sys/kernel/debug:/sys/kernel/debug \
+		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		keyval/odiglet-base:v1.8 \
+		/bin/sh -c "cd ../app && make test"
+
+.PHONY: test
+test: generate
+	go test -v ./...
+
 .PHONY: build
 build: generate
 	go build -o runtime-detector ./cmd/...
