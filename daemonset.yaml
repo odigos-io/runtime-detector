@@ -22,7 +22,11 @@ spec:
         name: runtime-detector
         resources: {}
         securityContext:
-          privileged: true
+          capabilities:
+            add:
+            - BPF        # needed to load eBPF programs and maps
+            - PERFMON    # needed to load tracepoints eBPF programs
+            - SYS_PTRACE # needed to read /proc files
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:

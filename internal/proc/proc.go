@@ -20,9 +20,9 @@ func procFile(pid int, filename string) string {
 	return fmt.Sprintf("%s/%d/%s", procFS, pid, filename)
 }
 
-func GetCurrentPIDNameSpaceIndoe() (uint32, error) {
+func GetCurrentPIDNameSpaceInode() (uint32, error) {
 	// look at the pid namespace of the root process
-	path := procFile(1, "ns/pid")
+	path := fmt.Sprintf("%s/self/ns/pid", procFS)
 	content, err := os.Readlink(path)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read link %s: %w", path, err)

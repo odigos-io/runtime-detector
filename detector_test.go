@@ -34,7 +34,8 @@ func (p *testProcess) stop() {
 type testCase struct {
 	name           string
 	envVars        map[string]string
-	exePath        string
+	exePathToRun   string
+	exePathToCheck string
 	args           []string
 	shouldDetect   bool
 	expectedEvents []ProcessEventType
@@ -58,22 +59,24 @@ func TestDetector(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			name:         "basic process",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "/usr/bin/sleep",
-			args:         []string{"1"},
-			shouldDetect: true,
+			name:           "basic process",
+			envVars:        map[string]string{"USER_ENV": "value"},
+			exePathToRun:   "/usr/bin/sleep",
+			exePathToCheck: "/usr/bin/sleep",
+			args:           []string{"1"},
+			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessExitEvent,
 			},
 		},
 		{
-			name:         "multiple file opens",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      filepath.Join(testDir, "file_open"),
-			args:         []string{testFile, testFile2},
-			shouldDetect: true,
+			name:           "multiple file opens",
+			envVars:        map[string]string{"USER_ENV": "value"},
+			exePathToRun:   filepath.Join(testDir, "file_open"),
+			exePathToCheck: filepath.Join(testDir, "file_open"),
+			args:           []string{testFile, testFile2},
+			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessFileOpenEvent,
@@ -82,30 +85,43 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:         "short lived process",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      filepath.Join(testDir, "short_lived"),
-			args:         []string{testFile},
-			shouldDetect: false, // Should be filtered out by duration filter
+			name:           "bash launching a command",
+			envVars:        map[string]string{"USER_ENV": "value"},
+			exePathToRun:   "/usr/bin/sh",
+			exePathToCheck: "/usr/bin/sleep",
+			args:           []string{"-c", "exec sleep 1"},
+			shouldDetect:   true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessExitEvent,
+			},
+		},
+		{
+			name:           "short lived process",
+			envVars:        map[string]string{"USER_ENV": "value"},
+			exePathToRun:   filepath.Join(testDir, "short_lived"),
+			exePathToCheck: filepath.Join(testDir, "short_lived"),
+			args:           []string{testFile},
+			shouldDetect:   false, // Should be filtered out by duration filter
 		},
 		{
 			name:         "filtered process by env prefix",
 			envVars:      map[string]string{},
-			exePath:      "/usr/bin/sleep",
+			exePathToRun: "/usr/bin/sleep",
 			args:         []string{"1"},
 			shouldDetect: false,
 		},
 		{
 			name:         "process executable is filtered",
 			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "/usr/bin/bash",
+			exePathToRun: "/usr/bin/bash",
 			args:         []string{"-c", "echo hello"},
 			shouldDetect: false,
 		},
 		{
 			name:         "bash script is filtered",
 			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "test/script.sh",
+			exePathToRun: "test/script.sh",
 			args:         []string{},
 			shouldDetect: false,
 		},
@@ -116,16 +132,16 @@ func TestDetector(t *testing.T) {
 			events := make(chan ProcessEvent, 100)
 
 			// Compile the test program if it's a Go program
-			if strings.HasPrefix(tc.exePath, testDir) {
-				cmd := exec.Command("go", "build", "-o", tc.exePath, "./test/go_processes/"+filepath.Base(tc.exePath)+"/main.go")
+			if strings.HasPrefix(tc.exePathToRun, testDir) {
+				cmd := exec.Command("go", "build", "-o", tc.exePathToRun, "./test/go_processes/"+filepath.Base(tc.exePathToRun)+"/main.go")
 				err := cmd.Run()
 				require.NoError(t, err)
-				defer os.Remove(tc.exePath)
+				defer os.Remove(tc.exePathToRun)
 			}
 
 			opts := []DetectorOption{
-				WithMinDuration(100 * time.Millisecond),
-				WithExePathsToFilter("/usr/bin/bash"),
+				WithMinDuration(300 * time.Millisecond),
+				WithExePathsToFilter("/usr/bin/bash", "usr/bin/sh"),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
@@ -152,7 +168,7 @@ func TestDetector(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 
 			// Create and run the test process
-			cmd := exec.Command(tc.exePath, tc.args...)
+			cmd := exec.Command(tc.exePathToRun, tc.args...)
 			cmd.Env = append(os.Environ(), envVarsToSlice(tc.envVars)...)
 
 			// Capture stdout and stderr
@@ -203,7 +219,7 @@ func TestDetector(t *testing.T) {
 			for i, event := range receivedEvents {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
-					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+					assert.Equal(t, tc.exePathToCheck, event.ExecDetails.ExePath, "unexpected executable path")
 					if len(tc.envVars) > 0 {
 						for k, v := range tc.envVars {
 							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
