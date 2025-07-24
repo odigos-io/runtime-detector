@@ -11,7 +11,6 @@ import (
 
 	"github.com/odigos-io/runtime-detector/internal/common"
 	duration "github.com/odigos-io/runtime-detector/internal/duration_filter"
-	exepathfilter "github.com/odigos-io/runtime-detector/internal/exe_path_filter"
 	"github.com/odigos-io/runtime-detector/internal/probe"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -137,16 +136,14 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 	// the following steps are used to create the filters chain
 	// 1. ebpf probe generating events and doing basic filtering
 	// 2. duration filter to filter out short-lived processes
-	// 3. exe path filter to filter out processes based on their executable path
-	exePathFilter := exepathfilter.NewExePathFilter(c.logger, c.exePathsToFilter, procEvents)
-	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, exePathFilter)
+	durationFilter := duration.NewDurationFilter(c.logger, c.minDuration, procEvents)
 	p := probe.New(c.logger, durationFilter, probe.Config{
 		EnvPrefixFilter:   c.envPrefixFilter,
 		OpenFilesToTrack:  c.filesOpenTrigger,
 		ExecFilesToFilter: c.exePathsToFilter,
 	})
 
-	filters := []common.ProcessesFilter{durationFilter, exePathFilter}
+	filters := []common.ProcessesFilter{durationFilter}
 
 	d := &Detector{
 		p:                p,
