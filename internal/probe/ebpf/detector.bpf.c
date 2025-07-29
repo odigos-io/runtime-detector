@@ -1,5 +1,6 @@
 #include "vmlinux.h"
 #include "bpf_helpers.h"
+#include "utils.h"
 
 #ifndef NO_BTF
 #include "bpf_core_read.h"
@@ -137,13 +138,7 @@ static __always_inline env_prefix_t *get_env_prefix() {
 }
 
 static __always_inline bool is_env_prefix_match(char *env, env_prefix_t *configured_prefix) {
-    u64 len = configured_prefix->len;
-    for (int i = 0; i < (len & MAX_ENV_PREFIX_MASK); i++) {
-        if (env[i] != configured_prefix->prefix[i]) {
-            return false;
-        }
-    }
-    return true;
+    return __bpf_memcmp(env, configured_prefix->prefix, MAX_ENV_PREFIX_LEN);
 }
 
 static __always_inline bool compare_open_filenames(open_filename_t *opened_filename, open_filename_t *configured_filename) {
@@ -273,6 +268,16 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
+    // only read up to the configured prefix length
+    // if the configured prefix is shorter than MAX_ENV_PREFIX_LEN,
+    // the buffer will have the contents [<max prefix length bytes>, 0, 0 ,...0]
+    u32 size_to_read = configured_prefix->len;
+    if (size_to_read > MAX_ENV_PREFIX_LEN) {
+        // user space should validate the env prefix passed, this should not happen if user space verifies the prefix length
+        bpf_printk("Configured prefix length is too long: %lld", size_to_read);
+        return 0;
+    }
+
     #pragma unroll
     for (int i = 0; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
@@ -280,7 +285,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
             return 0;
         }
 
-        ret = bpf_probe_read_user_str(&buf[0], sizeof(buf), argp);
+        ret = bpf_probe_read_user(&buf[0], size_to_read, argp);
         if (ret < 0) {
             return 0;
         }
