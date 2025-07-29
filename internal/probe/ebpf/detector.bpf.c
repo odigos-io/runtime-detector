@@ -15,7 +15,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_CONCURRENT_PIDS       (16384) // 2^14
 
 // The maximum length of the prefix we are looking for in the environment variables.
-#define MAX_ENV_PREFIX_LEN        (32)
+#define MAX_ENV_PREFIX_LEN        (16)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
 #define MAX_ENV_VARS              (1024)
 
