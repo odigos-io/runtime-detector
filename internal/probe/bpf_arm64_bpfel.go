@@ -16,7 +16,7 @@ import (
 type bpfEnvPrefixT struct {
 	_      structs.HostLayout
 	Len    uint64
-	Prefix [128]uint8
+	Prefix [16]uint8
 }
 
 type bpfExecFilenameT struct {

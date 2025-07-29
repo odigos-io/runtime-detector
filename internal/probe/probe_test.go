@@ -28,7 +28,7 @@ func TestLoad(t *testing.T) {
 	t.Run("load with env prefix", func(t *testing.T) {
 		p := &Probe{
 			logger:          slog.Default(),
-			envPrefixFilter: "TEST",
+			envPrefixFilter: "ODIGOS_POD_NAME",
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
@@ -40,11 +40,11 @@ func TestLoad(t *testing.T) {
 		value := bpfEnvPrefixT{}
 		err = m.Lookup(uint32(0), &value)
 		assert.NoError(t, err)
-		assert.Equal(t, uint64(len("TEST")), value.Len)
+		assert.Equal(t, uint64(len("ODIGOS_POD_NAME")), value.Len)
 
-		prefixStr := make([]byte, len("TEST"))
+		prefixStr := make([]byte, len("ODIGOS_POD_NAME"))
 		copy(prefixStr, value.Prefix[:])
-		assert.Equal(t, []byte("TEST"), prefixStr)
+		assert.Equal(t, []byte("ODIGOS_POD_NAME"), prefixStr)
 	})
 
 	t.Run("load with too long env prefix", func(t *testing.T) {
