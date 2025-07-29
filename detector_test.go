@@ -14,6 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// bigEnvVarsMap is a map with a lot of environment variables to test the detector's handling of a process
+// with many environment variables.
+var bigEnvVarsMap = func() map[string]string {
+	m := make(map[string]string)
+	for i := 0; i < 1000; i++ {
+		m[fmt.Sprintf("TEST_ENV_VAR_%d", i)] = fmt.Sprintf("value%d", i)
+	}
+
+	m["USER_ENV"] = "value"
+	return m
+}()
+
 type testProcess struct {
 	cmd     *exec.Cmd
 	pid     int
@@ -31,12 +43,13 @@ func (p *testProcess) stop() {
 }
 
 type testCase struct {
-	name           string
-	envVars        map[string]string
-	exePath        string
-	args           []string
-	shouldDetect   bool
-	expectedEvents []ProcessEventType
+	name            string
+	envVarsForExec  map[string]string
+	envVarsToAssert map[string]string
+	exePath         string
+	args            []string
+	shouldDetect    bool
+	expectedEvents  []ProcessEventType
 }
 
 func TestDetector(t *testing.T) {
@@ -57,22 +70,22 @@ func TestDetector(t *testing.T) {
 
 	testCases := []testCase{
 		{
-			name:         "basic process",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "/usr/bin/sleep",
-			args:         []string{"1"},
-			shouldDetect: true,
+			name:           "basic process",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"1"},
+			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessExitEvent,
 			},
 		},
 		{
-			name:         "multiple file opens",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      filepath.Join(testDir, "file_open"),
-			args:         []string{testFile, testFile2},
-			shouldDetect: true,
+			name:           "multiple file opens",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        filepath.Join(testDir, "file_open"),
+			args:           []string{testFile, testFile2},
+			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessFileOpenEvent,
@@ -81,25 +94,37 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:         "short lived process",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      filepath.Join(testDir, "short_lived"),
-			args:         []string{testFile},
-			shouldDetect: false, // Should be filtered out by duration filter
+			name:           "process with a lot of environment variables",
+			envVarsForExec: bigEnvVarsMap,
+			envVarsToAssert: map[string]string{"USER_ENV": "value"},
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"1"},
+			shouldDetect:   true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessExitEvent,
+			},
 		},
 		{
-			name:         "filtered process by env prefix",
-			envVars:      map[string]string{},
-			exePath:      "/usr/bin/sleep",
-			args:         []string{"1"},
-			shouldDetect: false,
+			name:           "short lived process",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        filepath.Join(testDir, "short_lived"),
+			args:           []string{testFile},
+			shouldDetect:   false, // Should be filtered out by duration filter
 		},
 		{
-			name:         "process executable is filtered",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "/usr/bin/bash",
-			args:         []string{"-c", "echo hello"},
-			shouldDetect: false,
+			name:           "filtered process by env prefix",
+			envVarsForExec: map[string]string{},
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"1"},
+			shouldDetect:   false, // should be filtered out in eBPF based on env prefix
+		},
+		{
+			name:           "process executable is filtered",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        "/usr/bin/bash",
+			args:           []string{"-c", "echo hello"},
+			shouldDetect:   false,
 		},
 	}
 
@@ -142,7 +167,7 @@ func TestDetector(t *testing.T) {
 
 			// Create and run the test process
 			cmd := exec.Command(tc.exePath, tc.args...)
-			cmd.Env = append(os.Environ(), envVarsToSlice(tc.envVars)...)
+			cmd.Env = append(os.Environ(), envVarsToSlice(tc.envVarsForExec)...)
 
 			// Capture stdout and stderr
 			var stdout, stderr strings.Builder
@@ -193,8 +218,16 @@ func TestDetector(t *testing.T) {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
 					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
-					if len(tc.envVars) > 0 {
-						for k, v := range tc.envVars {
+
+					var envVarsToAssert map[string]string
+					if len(tc.envVarsToAssert) > 0 {
+						envVarsToAssert = tc.envVarsToAssert
+					} else {
+						envVarsToAssert = tc.envVarsForExec
+					}
+
+					if len(envVarsToAssert) > 0 {
+						for k, v := range envVarsToAssert {
 							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
 						}
 					}

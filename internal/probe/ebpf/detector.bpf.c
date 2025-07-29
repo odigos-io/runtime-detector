@@ -271,6 +271,9 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     // only read up to the configured prefix length
     // if the configured prefix is shorter than MAX_ENV_PREFIX_LEN,
     // the buffer will have the contents [<max prefix length bytes>, 0, 0 ,...0]
+    // this allows us to always use a constant-size compare function
+    // (comparing MAX_ENV_PREFIX_LEN bytes) in an optimized way
+    // and a verifier-friendly way.
     u32 size_to_read = configured_prefix->len;
     if (size_to_read > MAX_ENV_PREFIX_LEN) {
         // user space should validate the env prefix passed, this should not happen if user space verifies the prefix length
