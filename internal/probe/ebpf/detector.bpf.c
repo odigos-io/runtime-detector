@@ -15,9 +15,9 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define MAX_CONCURRENT_PIDS       (16384) // 2^14
 
 // The maximum length of the prefix we are looking for in the environment variables.
-#define MAX_ENV_PREFIX_LEN        (128)
+#define MAX_ENV_PREFIX_LEN        (32)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
-#define MAX_ENV_VARS              (4096)
+#define MAX_ENV_VARS              (1024)
 
 // The maximum length of the executable pathname to filter out.
 #define MAX_EXEC_PATHNAME_LEN     (64)
@@ -278,10 +278,6 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
         if (ret < 0) {
             return 0;
-        }
-
-        if (argp == NULL) {
-            break;
         }
 
         ret = bpf_probe_read_user_str(&buf[0], sizeof(buf), argp);

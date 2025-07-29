@@ -16,7 +16,7 @@ import (
 type bpf_no_btfEnvPrefixT struct {
 	_      structs.HostLayout
 	Len    uint64
-	Prefix [128]uint8
+	Prefix [32]uint8
 }
 
 type bpf_no_btfExecFilenameT struct {
