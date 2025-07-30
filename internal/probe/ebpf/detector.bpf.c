@@ -223,8 +223,10 @@ static __always_inline bool is_executable_ignored(const char *filename) {
     exec_filename_t executed_filename = {0};
     long bytes_read = bpf_probe_read_user_str(&executed_filename.buf[0], sizeof(executed_filename.buf), filename);
     if (bytes_read <= 0) {
-        // if we fail to read the filename, should we assume we need to ignore it?
-        return true;
+        // we might fail to read the filename if the user memory for that string is not paged in yet.
+        // see https://mozillazg.com/2024/03/ebpf-tracepoint-syscalls-sys-enter-execve-can-not-get-filename-argv-values-case-en.html for more details.
+        // pass the event to user space, to avoid missing the execve event of a possible relevant process.
+        return false;
     }
 
     // bytes read includes the null terminator
