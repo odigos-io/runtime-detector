@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,14 +19,19 @@ import (
 const defaultMinDuration = (1 * time.Second)
 
 type Detector struct {
-	p                *probe.Probe
-	filters          []common.ProcessesFilter
-	l                *slog.Logger
-	procEvents       chan common.PIDEvent
-	output           chan<- ProcessEvent
-	envKeys          map[string]struct{}
-	envPrefixFilter  string
-	exePathsToFilter map[string]struct{}
+	p               *probe.Probe
+	filters         []common.ProcessesFilter
+	l               *slog.Logger
+	procEvents      chan common.PIDEvent
+	output          chan<- ProcessEvent
+	envKeys         map[string]struct{}
+	envPrefixFilter string
+
+	// before the detector passes the process to the output channel,
+	// it will filter out processes that do not have the environment variables with the specified prefix.
+	// this map will be used to avoid sending exit events for processes that do not have the prefix.
+	pidsFilteredByEnvPrefix map[int]struct{}
+	exePathsToFilter        map[string]struct{}
 }
 
 type ProcessEventType int
@@ -146,14 +152,15 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 	filters := []common.ProcessesFilter{durationFilter}
 
 	d := &Detector{
-		p:                p,
-		filters:          filters,
-		l:                c.logger,
-		procEvents:       procEvents,
-		output:           output,
-		envKeys:          c.envs,
-		envPrefixFilter:  c.envPrefixFilter,
-		exePathsToFilter: c.exePathsToFilter,
+		p:                       p,
+		filters:                 filters,
+		l:                       c.logger,
+		procEvents:              procEvents,
+		output:                  output,
+		envKeys:                 c.envs,
+		envPrefixFilter:         c.envPrefixFilter,
+		exePathsToFilter:        c.exePathsToFilter,
+		pidsFilteredByEnvPrefix: make(map[int]struct{}),
 	}
 
 	return d, nil
@@ -201,10 +208,32 @@ func (d *Detector) procEventLoop() {
 				d.l.Error("failed to get process details", "pid", e.Pid, "error", err)
 				continue
 			}
+
+			// make sure the env prefix is present before sending the event
+			if d.envPrefixFilter != "" {
+				foundEnvPrefix := false
+				for k := range execDetails.Environments {
+					if strings.HasPrefix(k, d.envPrefixFilter) {
+						foundEnvPrefix = true
+						break
+					}
+				}
+				if !foundEnvPrefix {
+					d.l.Warn("skipping process event due to env prefix not present", "pid", e.Pid, "envPrefixFilter", d.envPrefixFilter)
+					d.pidsFilteredByEnvPrefix[e.Pid] = struct{}{}
+					continue
+				}
+			}
+
 			pe.ExecDetails = execDetails
 			pe.EventType = ProcessEventType(e.Type)
 			d.output <- pe
 		case common.EventTypeExit:
+			if _, ok := d.pidsFilteredByEnvPrefix[e.Pid]; ok {
+				d.l.Debug("skipping exit event for process filtered by env prefix", "pid", e.Pid)
+				delete(d.pidsFilteredByEnvPrefix, e.Pid)
+				continue
+			}
 			pe.EventType = ProcessExitEvent
 			d.output <- pe
 		default:

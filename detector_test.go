@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,17 +15,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bigEnvVarsMap is a map with a lot of environment variables to test the detector's handling of a process
+// bigEnvVarsMapWithUserVal is a map with a lot of environment variables to test the detector's handling of a process
 // with many environment variables.
-var bigEnvVarsMap = func() map[string]string {
-	m := make(map[string]string)
-	for i := 0; i < 1000; i++ {
-		m[fmt.Sprintf("TEST_ENV_VAR_%d", i)] = fmt.Sprintf("value%d", i)
-	}
+var (
+	bigEnvVarsMapWithUserVal = func() map[string]string {
+		m := make(map[string]string)
+		for i := 0; i < 2000; i++ {
+			m[fmt.Sprintf("TEST_ENV_VAR_%d", i)] = fmt.Sprintf("value%d", i)
+		}
 
-	m["USER_ENV"] = "value"
-	return m
-}()
+		m["USER_ENV"] = "value"
+		return m
+	}()
+
+	bigEnvVarsMapWithoutUserVal = func() map[string]string {
+		m := make(map[string]string)
+		for i := 0; i < 2000; i++ {
+			m[fmt.Sprintf("TEST_ENV_VAR_%d", i)] = fmt.Sprintf("value%d", i)
+		}
+		return m
+	}()
+)
+
 
 type testProcess struct {
 	cmd     *exec.Cmd
@@ -94,8 +106,8 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:           "process with a lot of environment variables",
-			envVarsForExec: bigEnvVarsMap,
+			name:           "process with a lot of environment variables and user env var",
+			envVarsForExec: bigEnvVarsMapWithUserVal,
 			envVarsToAssert: map[string]string{"USER_ENV": "value"},
 			exePath:        "/usr/bin/sleep",
 			args:           []string{"1"},
@@ -104,6 +116,13 @@ func TestDetector(t *testing.T) {
 				ProcessExecEvent,
 				ProcessExitEvent,
 			},
+		},
+		{
+			name:           "process with a lot of environment variables without user env var",
+			envVarsForExec: bigEnvVarsMapWithoutUserVal,
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"1"},
+			shouldDetect:   false, // Should be filtered out by environment variable filter
 		},
 		{
 			name:           "short lived process",
@@ -242,5 +261,7 @@ func envVarsToSlice(envVars map[string]string) []string {
 	for k, v := range envVars {
 		result = append(result, k+"="+v)
 	}
+
+	slices.Sort(result)
 	return result
 }

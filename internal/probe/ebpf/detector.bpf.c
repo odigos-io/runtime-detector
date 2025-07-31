@@ -259,6 +259,10 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         field:const char *const * argv;	offset:24;	size:8;	signed:0;
         field:const char *const * envp;	offset:32;	size:8;	signed:0;
     */
+    u64 pid_tgid = 0;
+    u32 pid = 0;
+    pids_in_ns_t pids = {0};
+    struct task_struct *task = NULL;
     const char **args = (const char **)(ctx->args[2]);
     const char *argp;
     // save space for a terminating null byte
@@ -283,8 +287,9 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
+    int i = 0;
     #pragma unroll
-    for (int i = 0; i < MAX_ENV_VARS; i++) {
+    for (; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
         if (ret < 0) {
             return 0;
@@ -303,6 +308,12 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 
     // only proceed if the prefix is found in the environment variables
     if (!found_relevant) {
+        if (i == MAX_ENV_VARS) {
+            // if we went through all the environment variables and did not find a match,
+            // we still want to report the exec event to user space, in case the process has the desired prefix
+            // in the environment variables but it was not in the range we read.
+            goto track_and_report;
+        }
         return 0;
     }
 
@@ -312,16 +323,16 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
+track_and_report:
     // from this point, we know that the process is relevant and we should track it and notify user space
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
-    pids_in_ns_t pids = {0};
+    pid_tgid = bpf_get_current_pid_tgid();
+    pid =  (u32)(pid_tgid & 0xFFFFFFFF);
 
 #ifdef NO_BTF
     pids.configured_ns_pid = pid;
     pids.last_level_pid = 0;
 #else
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids);
     if (ret < 0) {
         bpf_printk("Could not find PID for task: 0x%llx", bpf_get_current_pid_tgid());
