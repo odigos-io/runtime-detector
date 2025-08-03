@@ -263,12 +263,11 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     u32 pid = 0;
     pids_in_ns_t pids = {0};
     struct task_struct *task = NULL;
-    const char **args = (const char **)(ctx->args[2]);
+    const char **envp = (const char **)(ctx->args[2]);
     const char *argp;
     // save space for a terminating null byte
     char buf[MAX_ENV_PREFIX_LEN + 1] = {0};
     long ret;
-    bool found_relevant = false;
     env_prefix_t *configured_prefix = get_env_prefix();
     if (!configured_prefix) {
         return 0;
@@ -290,32 +289,33 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     int i = 0;
     #pragma unroll
     for (; i < MAX_ENV_VARS; i++) {
-        ret = bpf_probe_read_user(&argp, sizeof(argp), &args[i]);
+        ret = bpf_probe_read_user(&argp, sizeof(argp), &envp[i]);
         if (ret < 0) {
+            return 0;
+        }
+
+        if (!argp) {
+            // envp[i] is NULL, we reached the end of the environment variables vector
+            // and did not find a relevant one.
             return 0;
         }
 
         ret = bpf_probe_read_user(&buf[0], size_to_read, argp);
         if (ret < 0) {
-            return 0;
+            // we tried to read a **non** NULL pointer, but failed.
+            // this can happen if the user memory for that string is not paged in yet.
+            break;
         }
 
         if (is_env_prefix_match(&buf[0], configured_prefix)) {
-            found_relevant = true;
             break;
         }
     }
 
-    // only proceed if the prefix is found in the environment variables
-    if (!found_relevant) {
-        if (i == MAX_ENV_VARS) {
-            // if we went through all the environment variables and did not find a match,
-            // we still want to report the exec event to user space, in case the process has the desired prefix
-            // in the environment variables but it was not in the range we read.
-            goto track_and_report;
-        }
-        return 0;
-    }
+    // from this point - there are 3 possibilities:
+    // 1. Found a relevant environment variable, and the process is relevant.
+    // 2. We failed to read one of the environment variables, and are not certain whether the process is relevant or not.
+    // 3. Scanned the first MAX_ENV_VARS environment variables and did not find a relevant one - no certainty that the process is relevant or not.
 
     // check if the executed file is in the list of files to ignore
     const char *filename = (const char *)(ctx->args[0]);
@@ -323,8 +323,6 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
-track_and_report:
-    // from this point, we know that the process is relevant and we should track it and notify user space
     pid_tgid = bpf_get_current_pid_tgid();
     pid =  (u32)(pid_tgid & 0xFFFFFFFF);
 

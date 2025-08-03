@@ -219,7 +219,12 @@ func (d *Detector) procEventLoop() {
 					}
 				}
 				if !foundEnvPrefix {
-					d.l.Warn("skipping process event due to env prefix not present", "pid", e.Pid, "envPrefixFilter", d.envPrefixFilter)
+					d.l.Warn("skipping process event due to env prefix not present",
+						"pid", e.Pid,
+						"envPrefixFilter", d.envPrefixFilter,
+						"cmdLine", execDetails.CmdLine,
+						"exePath", execDetails.ExePath,
+					)
 					d.pidsFilteredByEnvPrefix[e.Pid] = struct{}{}
 					continue
 				}
