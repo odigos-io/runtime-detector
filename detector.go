@@ -97,6 +97,7 @@ type ProcessExecDetails struct {
 type detectorConfig struct {
 	logger           *slog.Logger
 	minDuration      time.Duration
+	durationPassed   bool
 	envs             map[string]struct{}
 	envPrefixFilter  string
 	exePathsToFilter map[string]struct{}
@@ -335,7 +336,7 @@ func newConfig(opts []DetectorOption) (detectorConfig, error) {
 		c.logger = newDefaultLogger()
 	}
 
-	if c.minDuration == 0 {
+	if !c.durationPassed {
 		c.minDuration = defaultMinDuration
 	}
 
@@ -364,9 +365,11 @@ func WithLogger(l *slog.Logger) DetectorOption {
 
 // WithMinDuration returns a [DetectorOption] that configures a [Detector] to use the specified minimum duration
 // for a process to be considered active, the default is 1 second. This is used to filter out short-lived processes.
+// Passing a zero duration will result in a passthrough filter, which will not filter any processes.
 func WithMinDuration(d time.Duration) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.minDuration = d
+		c.durationPassed = true
 		return c, nil
 	})
 }

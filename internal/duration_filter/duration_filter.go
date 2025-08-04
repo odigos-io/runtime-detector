@@ -9,7 +9,7 @@ import (
 )
 
 type process struct {
-	t        *time.Timer
+	t *time.Timer
 }
 
 type durationFilter struct {
@@ -23,12 +23,40 @@ type durationFilter struct {
 }
 
 func NewDurationFilter(logger *slog.Logger, d time.Duration, output chan<- common.PIDEvent) common.ProcessesFilter {
+	if d == 0 {
+		logger.Info("duration is zero, using passthrough filter")
+		return &passthroughFilter{
+			logger: logger,
+			output: output,
+		}
+	}
+
 	return &durationFilter{
 		procs:        make(map[int]*process),
 		logger:       logger,
 		liveDuration: d,
 		output:       output,
 	}
+}
+
+type passthroughFilter struct {
+	logger *slog.Logger
+	output chan<- common.PIDEvent
+}
+
+func (pf *passthroughFilter) Add(pid int, eventType common.EventType) {
+	pf.logger.Debug("passthrough filter received pid", "pid", pid, "eventType", eventType.String())
+	pf.output <- common.PIDEvent{Pid: pid, Type: eventType}
+}
+
+func (pf *passthroughFilter) Remove(pid int) {
+	pf.logger.Debug("passthrough filter removing pid", "pid", pid)
+	pf.output <- common.PIDEvent{Pid: pid, Type: common.EventTypeExit}
+}
+
+func (pf *passthroughFilter) Close() error {
+	close(pf.output)
+	return nil
 }
 
 func (df *durationFilter) launchProcessCountdown(pid int, eventType common.EventType) *process {

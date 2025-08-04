@@ -350,9 +350,22 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         return 0;
     }
 
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_execve")
+int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+
+    u32 *user_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
+    if (user_pid == NULL) {
+        return 0;
+    }
+
     process_event_t event = {
         .type = PROCESS_EXEC,
-        .pid = pids.configured_ns_pid,
+        .pid = *user_pid,
     };
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));

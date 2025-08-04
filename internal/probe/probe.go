@@ -45,6 +45,7 @@ const (
 
 	eventsMapName               = "events"
 	execveSyscallProgramName    = "tracepoint__syscalls__sys_enter_execve"
+	execveSyscallExitProgramName = "tracepoint__syscalls__sys_exit_execve"
 	processForkNoBTFProgramName = "tracepoint__sched__sched_process_fork"
 	processForkProgramName      = "tracepoint_btf__sched__sched_process_fork"
 	processExitProgramName      = "tracepoint__sched__sched_process_exit"
@@ -237,6 +238,12 @@ func (p *Probe) attach() error {
 	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+	}
+	p.links = append(p.links, l)
+
+	l, err = link.Tracepoint("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
+	if err != nil {
+		return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
 	}
 	p.links = append(p.links, l)
 

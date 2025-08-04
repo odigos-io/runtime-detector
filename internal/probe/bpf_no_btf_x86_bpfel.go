@@ -77,6 +77,7 @@ type bpf_no_btfProgramSpecs struct {
 	TracepointSchedSchedProcessFork  *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpenat *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_openat"`
+	TracepointSyscallsSysExitExecve  *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_execve"`
 }
 
 // bpf_no_btfMapSpecs contains maps before they are loaded into the kernel.
@@ -156,6 +157,7 @@ type bpf_no_btfPrograms struct {
 	TracepointSchedSchedProcessFork  *ebpf.Program `ebpf:"tracepoint__sched__sched_process_fork"`
 	TracepointSyscallsSysEnterExecve *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpenat *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_openat"`
+	TracepointSyscallsSysExitExecve  *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_execve"`
 }
 
 func (p *bpf_no_btfPrograms) Close() error {
@@ -164,6 +166,7 @@ func (p *bpf_no_btfPrograms) Close() error {
 		p.TracepointSchedSchedProcessFork,
 		p.TracepointSyscallsSysEnterExecve,
 		p.TracepointSyscallsSysEnterOpenat,
+		p.TracepointSyscallsSysExitExecve,
 	)
 }
 
