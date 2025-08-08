@@ -38,7 +38,6 @@ var (
 	}()
 )
 
-
 type testProcess struct {
 	cmd     *exec.Cmd
 	pid     int
@@ -107,12 +106,12 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:           "process with a lot of environment variables and user env var",
-			envVarsForExec: bigEnvVarsMapWithUserVal,
+			name:            "process with a lot of environment variables and user env var",
+			envVarsForExec:  bigEnvVarsMapWithUserVal,
 			envVarsToAssert: map[string]string{"USER_ENV": "value"},
-			exePath:        "/usr/bin/sleep",
-			args:           []string{"1"},
-			shouldDetect:   true,
+			exePath:         "/usr/bin/sleep",
+			args:            []string{"1"},
+			shouldDetect:    true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessExitEvent,
@@ -147,11 +146,11 @@ func TestDetector(t *testing.T) {
 			shouldDetect:   false,
 		},
 		{
-			name:         "bash script is filtered",
-			envVars:      map[string]string{"USER_ENV": "value"},
-			exePath:      "test/script.sh",
-			args:         []string{},
-			shouldDetect: false,
+			name:           "bash script is filtered",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        "test/script.sh",
+			args:           []string{},
+			shouldDetect:   false,
 		},
 	}
 
