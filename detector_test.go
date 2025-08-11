@@ -35,6 +35,9 @@ var (
 		}
 		return m
 	}()
+
+	defaultMinDurationFilter = 100 * time.Millisecond
+	zeroDurationFilter       = time.Duration(0)
 )
 
 type testProcess struct {
@@ -54,13 +57,14 @@ func (p *testProcess) stop() {
 }
 
 type testCase struct {
-	name            string
-	envVarsForExec  map[string]string
-	envVarsToAssert map[string]string
-	exePath         string
-	args            []string
-	shouldDetect    bool
-	expectedEvents  []ProcessEventType
+	name              string
+	envVarsForExec    map[string]string
+	envVarsToAssert   map[string]string
+	exePath           string
+	args              []string
+	shouldDetect      bool
+	expectedEvents    []ProcessEventType
+	minDurationFilter *time.Duration
 }
 
 func TestDetector(t *testing.T) {
@@ -124,11 +128,23 @@ func TestDetector(t *testing.T) {
 			shouldDetect:   false, // Should be filtered out by environment variable filter
 		},
 		{
-			name:           "short lived process",
+			name:           "short lived process with duration filter",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        filepath.Join(testDir, "short_lived"),
 			args:           []string{testFile},
 			shouldDetect:   false, // Should be filtered out by duration filter
+		},
+		{
+			name:              "short lived process with zero duration filter",
+			envVarsForExec:    map[string]string{"USER_ENV": "value"},
+			exePath:           filepath.Join(testDir, "short_lived"),
+			args:              []string{testFile},
+			shouldDetect:      true,
+			minDurationFilter: &zeroDurationFilter,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessExitEvent,
+			},
 		},
 		{
 			name:           "filtered process by env prefix",
@@ -159,12 +175,17 @@ func TestDetector(t *testing.T) {
 			}
 
 			opts := []DetectorOption{
-				WithMinDuration(100 * time.Millisecond),
 				WithExePathsToFilter("/usr/bin/bash"),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
 			}
+
+			duration := defaultMinDurationFilter
+			if tc.minDurationFilter != nil {
+				duration = *tc.minDurationFilter
+			}
+			opts = append(opts, WithMinDuration(duration))
 
 			d, err := NewDetector(events, opts...)
 			require.NoError(t, err)
