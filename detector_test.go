@@ -37,7 +37,6 @@ var (
 	}()
 )
 
-
 type testProcess struct {
 	cmd     *exec.Cmd
 	pid     int
@@ -106,12 +105,12 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:           "process with a lot of environment variables and user env var",
-			envVarsForExec: bigEnvVarsMapWithUserVal,
+			name:            "process with a lot of environment variables and user env var",
+			envVarsForExec:  bigEnvVarsMapWithUserVal,
 			envVarsToAssert: map[string]string{"USER_ENV": "value"},
-			exePath:        "/usr/bin/sleep",
-			args:           []string{"1"},
-			shouldDetect:   true,
+			exePath:         "/usr/bin/sleep",
+			args:            []string{"1"},
+			shouldDetect:    true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
 				ProcessExitEvent,
@@ -215,6 +214,146 @@ func TestDetector(t *testing.T) {
 
 			// Cancel the context to stop the detector
 			cancel()
+
+			// Collect all events
+			var receivedEvents []ProcessEvent
+			for event := range events {
+				receivedEvents = append(receivedEvents, event)
+			}
+
+			if !tc.shouldDetect {
+				assert.Empty(t, receivedEvents, "should not have detected any events")
+				return
+			}
+
+			// Verify we received the expected events
+			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+				t.Logf("received events: %v\n", receivedEvents)
+				return
+			}
+
+			for i, event := range receivedEvents {
+				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
+				if event.ExecDetails != nil {
+					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+
+					var envVarsToAssert map[string]string
+					if len(tc.envVarsToAssert) > 0 {
+						envVarsToAssert = tc.envVarsToAssert
+					} else {
+						envVarsToAssert = tc.envVarsForExec
+					}
+
+					if len(envVarsToAssert) > 0 {
+						for k, v := range envVarsToAssert {
+							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDetectorInitialScan(t *testing.T) {
+	testCases := []testCase{
+		{
+			name:           "initial scan - basic process with user env",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"10"}, // Long sleep to keep process alive, we'll kill it before it exits
+			shouldDetect:   true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent, // exec event for initial scan
+				ProcessExitEvent, // exit event after the process ends
+			},
+		},
+		{
+			name:            "initial scan - process with many env vars and user env",
+			envVarsForExec:  bigEnvVarsMapWithUserVal,
+			envVarsToAssert: map[string]string{"USER_ENV": "value"},
+			exePath:         "/usr/bin/sleep",
+			args:            []string{"10"},
+			shouldDetect:    true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessExitEvent,
+			},
+		},
+		{
+			name:           "initial scan - process with many env vars without user env",
+			envVarsForExec: bigEnvVarsMapWithoutUserVal,
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"10"},
+			shouldDetect:   false, // Should be filtered out by environment variable filter
+		},
+		{
+			name:           "initial scan - process without any env vars",
+			envVarsForExec: map[string]string{},
+			exePath:        "/usr/bin/sleep",
+			args:           []string{"10"},
+			shouldDetect:   false, // Should be filtered out by env prefix filter
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := make(chan ProcessEvent, 100)
+
+			// Start the test process BEFORE the detector
+			cmd := exec.Command(tc.exePath, tc.args...)
+			cmd.Env = append(os.Environ(), envVarsToSlice(tc.envVarsForExec)...)
+
+			// Capture stdout and stderr
+			var stdout, stderr strings.Builder
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Start()
+			require.NoError(t, err)
+
+			proc := &testProcess{
+				cmd: cmd,
+				pid: cmd.Process.Pid,
+			}
+			defer proc.stop()
+
+			// Give the process time to start and potentially open files
+			time.Sleep(100 * time.Millisecond)
+
+			// Now start the detector - this should trigger the initial scan
+			opts := []DetectorOption{
+				WithMinDuration(100 * time.Millisecond),
+				WithExePathsToFilter("/usr/bin/bash"),
+				WithEnvironments("USER_ENV"),
+				WithEnvPrefixFilter("USER_E"),
+			}
+
+			d, err := NewDetector(events, opts...)
+			require.NoError(t, err)
+
+			// Create context for the detector
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			go func() {
+				err := d.Run(ctx)
+				require.NoError(t, err)
+			}()
+
+			// Give the detector time to complete initial scan and process events
+			time.Sleep(1 * time.Second)
+			proc.stop()
+
+			// Give the detector time to process exit event
+			time.Sleep(100 * time.Millisecond)
+
+			// Cancel the context to stop the detector
+			cancel()
+
+			// Print stdout and stderr for debugging
+			t.Logf("stdout: %s", stdout.String())
+			t.Logf("stderr: %s", stderr.String())
 
 			// Collect all events
 			var receivedEvents []ProcessEvent
