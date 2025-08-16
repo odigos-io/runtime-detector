@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func repeatedString(length int, s string) string {
@@ -35,8 +36,7 @@ func TestLoad(t *testing.T) {
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
-		assert.NoError(t, err)
-
+		require.NoError(t, err)
 		m := p.c.Maps[envPrefixMapName]
 		assert.NotNil(t, m)
 
@@ -65,7 +65,7 @@ func TestLoad(t *testing.T) {
 			logger: slog.Default(),
 		}
 		err := p.load(uint32(4026532561))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		defer p.Close()
 
 		confMap, ok := p.c.Maps[detectorConfigMapName]
@@ -154,7 +154,7 @@ func TestLoad(t *testing.T) {
 		}
 		err := p.load(uint32(4026532561))
 		defer p.Close()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		confMap, ok := p.c.Maps[detectorConfigMapName]
 		assert.True(t, ok)
