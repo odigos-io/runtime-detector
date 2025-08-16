@@ -12,7 +12,7 @@
 
 /* an optimized memcmp implementation from Cilium,
 it works by XORing the two inputs at chunks of 8,4 or 2 bytes
-limited to 72 bytes comparisons,
+limited to 128 bytes comparisons,
 It helps the verifier by reduce branching complexity and it is more efficient than single byte comparisons */
 static __always_inline bool __bpf_memcmp(const void *x, const void *y, __u64 len) {
     __u64 r = 0;
@@ -30,17 +30,31 @@ static __always_inline bool __bpf_memcmp(const void *x, const void *y, __u64 len
     }
 
     switch (len) {
-    case 72:         __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 64: jmp_64: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 56: jmp_56: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 48: jmp_48: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 40: jmp_40: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 32: jmp_32: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 24: jmp_24: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case 16: jmp_16: __it_xor(x, y, r, 64); __attribute__((fallthrough));
-    case  8: jmp_8:  __it_xor(x, y, r, 64);
+	case 128:         __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 120:jmp_120: __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 112:jmp_112: __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 104:jmp_104: __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 96: jmp_96:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 88: jmp_88:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+	case 80: jmp_80:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 72: jmp_72:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 64: jmp_64:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 56: jmp_56:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 48: jmp_48:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 40: jmp_40:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 32: jmp_32:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 24: jmp_24:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case 16: jmp_16:  __it_xor(x, y, r, 64); __attribute__((fallthrough));
+    case  8: jmp_8:   __it_xor(x, y, r, 64);
         break;
 
+	case 126: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_120;
+	case 118: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_112;
+	case 110: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_104;
+	case 102: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_96;
+	case 94: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_88;
+	case 86: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_80;
+	case 78: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_72;
     case 70: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_64;
     case 62: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_56;
     case 54: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32); goto jmp_48;
@@ -52,6 +66,13 @@ static __always_inline bool __bpf_memcmp(const void *x, const void *y, __u64 len
     case  6: __it_xor(x, y, r, 16); __it_xor(x, y, r, 32);
         break;
 
+	case 124: __it_xor(x, y, r, 32); goto jmp_120;
+	case 116: __it_xor(x, y, r, 32); goto jmp_112;
+	case 108: __it_xor(x, y, r, 32); goto jmp_104;
+	case 100: __it_xor(x, y, r, 32); goto jmp_96;
+	case 92: __it_xor(x, y, r, 32); goto jmp_88;
+	case 84: __it_xor(x, y, r, 32); goto jmp_80;
+	case 76: __it_xor(x, y, r, 32); goto jmp_72;
     case 68: __it_xor(x, y, r, 32); goto jmp_64;
     case 60: __it_xor(x, y, r, 32); goto jmp_56;
     case 52: __it_xor(x, y, r, 32); goto jmp_48;
@@ -63,6 +84,13 @@ static __always_inline bool __bpf_memcmp(const void *x, const void *y, __u64 len
     case  4: __it_xor(x, y, r, 32);
         break;
 
+	case 122: __it_xor(x, y, r, 16); goto jmp_120;
+	case 114: __it_xor(x, y, r, 16); goto jmp_112;
+	case 106: __it_xor(x, y, r, 16); goto jmp_104;
+	case 98: __it_xor(x, y, r, 16); goto jmp_96;
+	case 90: __it_xor(x, y, r, 16); goto jmp_88;
+	case 82: __it_xor(x, y, r, 16); goto jmp_80;
+	case 74: __it_xor(x, y, r, 16); goto jmp_72;
     case 66: __it_xor(x, y, r, 16); goto jmp_64;
     case 58: __it_xor(x, y, r, 16); goto jmp_56;
     case 50: __it_xor(x, y, r, 16); goto jmp_48;

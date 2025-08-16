@@ -13,6 +13,15 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpf_no_btfDetectorConfigT struct {
+	_                    structs.HostLayout
+	ConfiguredPidNsInode uint32
+	Padding              [4]uint8
+	NumOpenPathsToTrack  uint8
+	NumExecPathsToFilter uint8
+	Padding2             [6]uint8
+}
+
 type bpf_no_btfEnvPrefixT struct {
 	_      structs.HostLayout
 	Len    uint64
@@ -84,6 +93,7 @@ type bpf_no_btfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfMapSpecs struct {
+	DetectorConfig        *ebpf.MapSpec `ebpf:"detector_config"`
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
 	ExecFilesToFilter     *ebpf.MapSpec `ebpf:"exec_files_to_filter"`
@@ -96,9 +106,6 @@ type bpf_no_btfMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_no_btfVariableSpecs struct {
-	ConfiguredPidNsInode *ebpf.VariableSpec `ebpf:"configured_pid_ns_inode"`
-	NumExecPathsToFilter *ebpf.VariableSpec `ebpf:"num_exec_paths_to_filter"`
-	NumOpenPathsToTrack  *ebpf.VariableSpec `ebpf:"num_open_paths_to_track"`
 }
 
 // bpf_no_btfObjects contains all objects after they have been loaded into the kernel.
@@ -121,6 +128,7 @@ func (o *bpf_no_btfObjects) Close() error {
 //
 // It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_no_btfMaps struct {
+	DetectorConfig        *ebpf.Map `ebpf:"detector_config"`
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
 	ExecFilesToFilter     *ebpf.Map `ebpf:"exec_files_to_filter"`
@@ -131,6 +139,7 @@ type bpf_no_btfMaps struct {
 
 func (m *bpf_no_btfMaps) Close() error {
 	return _Bpf_no_btfClose(
+		m.DetectorConfig,
 		m.EnvPrefix,
 		m.Events,
 		m.ExecFilesToFilter,
@@ -144,9 +153,6 @@ func (m *bpf_no_btfMaps) Close() error {
 //
 // It can be passed to loadBpf_no_btfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_no_btfVariables struct {
-	ConfiguredPidNsInode *ebpf.Variable `ebpf:"configured_pid_ns_inode"`
-	NumExecPathsToFilter *ebpf.Variable `ebpf:"num_exec_paths_to_filter"`
-	NumOpenPathsToTrack  *ebpf.Variable `ebpf:"num_open_paths_to_track"`
 }
 
 // bpf_no_btfPrograms contains all programs after they have been loaded into the kernel.
