@@ -308,7 +308,6 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     int i = 0;
-    #pragma unroll
     for (; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &envp[i]);
         if (ret < 0) {
