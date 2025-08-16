@@ -21,7 +21,10 @@ func TestLoad(t *testing.T) {
 			logger: slog.Default(),
 		}
 		err := p.load(uint32(4026532561))
-		defer p.Close()
+		defer func() {
+			err := p.Close()
+			assert.NoError(t, err)
+		}()
 		assert.NoError(t, err)
 	})
 
@@ -64,6 +67,16 @@ func TestLoad(t *testing.T) {
 		err := p.load(uint32(4026532561))
 		assert.NoError(t, err)
 		defer p.Close()
+
+		confMap, ok := p.c.Maps[detectorConfigMapName]
+		assert.True(t, ok)
+		assert.NotNil(t, confMap)
+		value := bpfDetectorConfigT{}
+		err = confMap.Lookup(uint32(0), &value)
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(4026532561), value.ConfiguredPidNsInode)
+		assert.Equal(t, uint8(0), value.NumOpenPathsToTrack)
+		assert.Equal(t, uint8(0), value.NumExecPathsToFilter)
 
 		pids := []int{1, 2, 3, 4, 5}
 		err = p.TrackPIDs(pids)
@@ -142,6 +155,16 @@ func TestLoad(t *testing.T) {
 		err := p.load(uint32(4026532561))
 		defer p.Close()
 		assert.NoError(t, err)
+
+		confMap, ok := p.c.Maps[detectorConfigMapName]
+		assert.True(t, ok)
+		assert.NotNil(t, confMap)
+		value := bpfDetectorConfigT{}
+		err = confMap.Lookup(uint32(0), &value)
+		assert.NoError(t, err)
+		assert.Equal(t, uint32(4026532561), value.ConfiguredPidNsInode)
+		assert.Equal(t, uint8(2), value.NumOpenPathsToTrack)
+		assert.Equal(t, uint8(3), value.NumExecPathsToFilter)
 
 		m := p.c.Maps[openTrackingFilenameMapName]
 		assert.NotNil(t, m)

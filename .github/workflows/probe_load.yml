@@ -12,7 +12,7 @@ env:
 jobs:
     vm-test:
         name: Run tests
-        runs-on: large-runner
+        runs-on: warp-ubuntu-2204-x64-8x-spot
         timeout-minutes: 15
         strategy:
           fail-fast: false
@@ -23,6 +23,7 @@ jobs:
               - "5.15"
               - "5.10"
               - "5.4"
+              - "4.19"
         steps:
           - uses: actions/checkout@v4
           - name: Set up Go

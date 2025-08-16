@@ -52,13 +52,27 @@ typedef struct {
     u8  buf[MAX_EXEC_PATHNAME_LEN];
 } exec_filename_t;
 
-// injected by the user space code, indicating how many paths are configured to track in the open probe,
-// must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
-volatile const u8 num_open_paths_to_track = 0;
+typedef struct {
+    // This is the inode number of the PID namespace we are interested in.
+    // It is set by the userspace code.
+    u32 configured_pid_ns_inode;
+    u8 padding[4];
 
-// injected by the user space code, indicating how many paths are configured
-// to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
-volatile const u8 num_exec_paths_to_filter = 0;
+    // injected by the user space code, indicating how many paths are configured to track in the open probe,
+    // must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
+    u8 num_open_paths_to_track;
+    // injected by the user space code, indicating how many paths are configured
+    // to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
+    u8 num_exec_paths_to_filter;
+    u8 padding2[6];
+} detector_config_t;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, u32);
+    __type(value, detector_config_t);
+    __uint(max_entries, 1);
+} detector_config SEC(".maps");
 
 // Used to store the paths configured to be tracked for relevant processes when open occurs.
 struct {
@@ -111,10 +125,6 @@ typedef struct process_event {
     u32 type;
     u32 pid;
 } process_event_t;
-
-// This is the inode number of the PID namespace we are interested in.
-// It is set by the userspace code.
-volatile const u32 configured_pid_ns_inode = 0;
 
 // return the configured env prefix for filtering, or NULL if invalid
 static __always_inline env_prefix_t *get_env_prefix() {
@@ -186,17 +196,26 @@ typedef struct pids_in_ns {
 
 #ifndef NO_BTF
 static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids) {
-    struct upid upid =     {0};
-    u32 inum =              0;
-    u32 selected_pid =      0;
-    unsigned int level =    BPF_CORE_READ(task, thread_pid, level);
-    unsigned int num_pids = level + 1;
-    bool found =            false;
+    struct upid upid =         {0};
+    u32 inum =                  0;
+    u32 selected_pid =          0;
+    unsigned int level =        BPF_CORE_READ(task, thread_pid, level);
+    unsigned int num_pids =     level + 1;
+    bool found =                false;
+    detector_config_t *config = NULL;
+    u32 zero_key =              0;
 
     if (num_pids > MAX_NS_FOR_PID) {
         bpf_printk("Number of PIDs is greater than supported: %d", num_pids);
         num_pids = MAX_NS_FOR_PID;
     }
+
+    config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return -1;
+    }
+
+    u32 configured_pid_ns_inode = config->configured_pid_ns_inode;
 
     for (int i = 0; i < num_pids && i < MAX_NS_FOR_PID; i++) {
         upid = BPF_CORE_READ(task, thread_pid, numbers[i]);
@@ -233,7 +252,13 @@ static __always_inline bool is_executable_ignored(const char *filename) {
     executed_filename.len = bytes_read - 1;
     exec_filename_t *configured_filename = NULL;
 
-    u32 num_paths = num_exec_paths_to_filter < MAX_EXEC_PATHS_TO_FILTER ? num_exec_paths_to_filter : MAX_EXEC_PATHS_TO_FILTER;
+    u32 zero_key = 0;
+    detector_config_t *config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return false;
+    }
+
+    u32 num_paths = config->num_exec_paths_to_filter < MAX_EXEC_PATHS_TO_FILTER ? config->num_exec_paths_to_filter : MAX_EXEC_PATHS_TO_FILTER;
     u32 idx = 0;
     for (u32 i = 0; i < num_paths; i++) {
         idx = i;
@@ -502,10 +527,20 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     opened_filename.len = bytes_read - 1;
     open_filename_t *configured_filename = NULL;
 
-    u32 num_paths = num_open_paths_to_track < MAX_OPEN_PATHS_TO_TRACK ? num_open_paths_to_track : MAX_OPEN_PATHS_TO_TRACK;
+    u32 zero_key = 0;
+    detector_config_t *config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return 0;
+    }
+
+    u32 num_paths = config->num_open_paths_to_track;
 
     // go over the configured relevant paths and check if the opened file matches any of them
-    for (u32 i = 0; i < num_paths; i++) {
+    for (u32 i = 0; i < MAX_OPEN_PATHS_TO_TRACK; i++) {
+        if (i >= num_paths) {
+            break;
+        }
+
         u32 idx = i;
         configured_filename = bpf_map_lookup_elem(&files_open_to_track, &idx);
         if (configured_filename == NULL) {
