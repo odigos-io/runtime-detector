@@ -18,7 +18,11 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 // The maximum length of the prefix we are looking for in the environment variables.
 #define MAX_ENV_PREFIX_LEN        (16)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
+#ifndef SMALL_PROGRAM
 #define MAX_ENV_VARS              (1536)
+#else
+#define MAX_ENV_VARS              (128)
+#endif
 
 // The maximum length of the executable pathname to filter out.
 #define MAX_EXEC_PATHNAME_LEN     (64)
@@ -159,6 +163,7 @@ static __always_inline bool compare_open_filenames(open_filename_t *opened_filen
         return false;
     }
 
+#pragma unroll(MAX_OPEN_PATHNAME_MASK)
     for (int i = 0; i < (len & MAX_OPEN_PATHNAME_MASK); i++) {
         if (opened_filename->buf[i] != configured_filename->buf[i]) {
             return false;
@@ -177,12 +182,7 @@ static __always_inline bool compare_exec_filenames(exec_filename_t *executed_fil
         return false;
     }
 
-    for (int i = 0; i < (len & MAX_EXEC_PATHNAME_MASK); i++) {
-        if (executed_filename->buf[i] != configured_filename->buf[i]) {
-            return false;
-        }
-    }
-    return true;
+    return __bpf_memcmp(executed_filename->buf, configured_filename->buf, MAX_EXEC_PATHNAME_LEN);
 }
 
 typedef struct pids_in_ns {
@@ -214,6 +214,7 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
 
     u32 configured_pid_ns_inode = config->configured_pid_ns_inode;
 
+#pragma unroll(MAX_NS_FOR_PID)
     for (int i = 0; i < num_pids && i < MAX_NS_FOR_PID; i++) {
         upid = BPF_CORE_READ(task, thread_pid, numbers[i]);
         inum = BPF_CORE_READ(upid.ns, ns.inum);
@@ -255,7 +256,7 @@ static __always_inline bool is_executable_ignored(const char *filename) {
         return false;
     }
 
-    u32 num_paths = config->num_exec_paths_to_filter < MAX_EXEC_PATHS_TO_FILTER ? config->num_exec_paths_to_filter : MAX_EXEC_PATHS_TO_FILTER;
+    u32 num_paths = config->num_exec_paths_to_filter;
     u32 idx = 0;
     for (u32 i = 0; i < num_paths; i++) {
         idx = i;
@@ -308,6 +309,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     int i = 0;
+#pragma unroll
     for (; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &envp[i]);
         if (ret < 0) {
@@ -337,11 +339,13 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     // 2. We failed to read one of the environment variables, and are not certain whether the process is relevant or not.
     // 3. Scanned the first MAX_ENV_VARS environment variables and did not find a relevant one - no certainty that the process is relevant or not.
 
+#ifndef SMALL_PROGRAM
     // check if the executed file is in the list of files to ignore
     const char *filename = (const char *)(ctx->args[0]);
     if (is_executable_ignored(filename)) {
         return 0;
     }
+#endif
 
     pid_tgid = bpf_get_current_pid_tgid();
     pid =  (u32)(pid_tgid & 0xFFFFFFFF);
@@ -523,6 +527,7 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     u32 num_paths = config->num_open_paths_to_track;
 
     // go over the configured relevant paths and check if the opened file matches any of them
+#pragma unroll(MAX_OPEN_PATHS_TO_TRACK)
     for (u32 i = 0; i < MAX_OPEN_PATHS_TO_TRACK; i++) {
         if (i >= num_paths) {
             break;

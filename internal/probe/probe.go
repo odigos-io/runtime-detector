@@ -21,6 +21,9 @@ import (
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_no_btf ./ebpf/detector.bpf.c -- -DNO_BTF -DBPF_NO_PRESERVE_ACCESS_INDEX
 
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_small ./ebpf/detector.bpf.c -- -DSMALL_PROGRAM
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_small_no_btf ./ebpf/detector.bpf.c -- -DNO_BTF -DBPF_NO_PRESERVE_ACCESS_INDEX -DSMALL_PROGRAM
+
 type Probe struct {
 	logger *slog.Logger
 	c      *ebpf.Collection
@@ -172,7 +175,16 @@ func (p *Probe) load(ns uint32) error {
 		return err
 	}
 
-	spec, err := loadBpf()
+	withBTFSpecFn := loadBpf
+	withoutBTFSpecFn := loadBpf_no_btf
+	smallProgRequired := (features.HaveBoundedLoops() != nil)
+	if smallProgRequired {
+		p.logger.Warn("kernel does not support bounded loops, loading small eBPF program")
+		withBTFSpecFn = loadBpf_small
+		withoutBTFSpecFn = loadBpf_small_no_btf
+	}
+
+	spec, err := withBTFSpecFn()
 	if err != nil {
 		return err
 	}
@@ -186,7 +198,7 @@ func (p *Probe) load(ns uint32) error {
 		// BTF is not supported, fallback to eBPF without BTF
 		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
 		p.btfDisabled = true
-		spec, err = loadBpf_no_btf()
+		spec, err = withoutBTFSpecFn()
 		if err != nil {
 			return err
 		}
