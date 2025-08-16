@@ -133,14 +133,12 @@ static __always_inline env_prefix_t *get_env_prefix() {
     env_prefix_t *configured_prefix = bpf_map_lookup_elem(&env_prefix, &key);
 
     if (!configured_prefix) {
-        bpf_printk("Env prefix not configured\n");
         return NULL;
     }
 
     // the user space code should validate that the prefix is not longer than MAX_ENV_PREFIX_LEN as well.
     u64 len = configured_prefix->len;
     if (len > MAX_ENV_PREFIX_LEN) {
-        bpf_printk("Env prefix is too long: %lld\n", len);
         return NULL;
     }
 
@@ -206,7 +204,6 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
     u32 zero_key =              0;
 
     if (num_pids > MAX_NS_FOR_PID) {
-        bpf_printk("Number of PIDs is greater than supported: %d", num_pids);
         num_pids = MAX_NS_FOR_PID;
     }
 
@@ -307,7 +304,6 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     u32 size_to_read = configured_prefix->len;
     if (size_to_read > MAX_ENV_PREFIX_LEN) {
         // user space should validate the env prefix passed, this should not happen if user space verifies the prefix length
-        bpf_printk("Configured prefix length is too long: %lld", size_to_read);
         return 0;
     }
 
@@ -358,20 +354,17 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids);
     if (ret < 0) {
-        bpf_printk("Could not find PID for task: 0x%llx", bpf_get_current_pid_tgid());
         return 0;
     }
 #endif
 
     ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret);
         return 0;
     }
 
     ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
     if (ret != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret);
         return 0;
     }
 
@@ -428,21 +421,18 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
 
     ret_code = get_pid_for_configured_ns(child, &pids);
     if (ret_code < 0) {
-        bpf_printk("Could not find PID for task: 0x%llx", child_pid);
         return 0;
     }
 
     // track this child pid
     ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
         return 0;
     }
 
     // populate the map with the container pid, so that user space can read it
     ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
         return 0;
     }
 
@@ -473,7 +463,6 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     u32 unknown_pid = 0;
     ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &child_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
         return 0;
     }
 
@@ -481,7 +470,6 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     // since we don't have BTF here, we can't get the last level pid
     ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &child_pid, &unknown_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
         return 0;
     }
 
