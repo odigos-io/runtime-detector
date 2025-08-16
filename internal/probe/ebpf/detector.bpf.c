@@ -32,11 +32,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 // The maximum length of the path we are looking for in the openat syscall
 #define MAX_OPEN_PATHNAME_LEN     (128)
 #define MAX_OPEN_PATHNAME_MASK    ((MAX_OPEN_PATHNAME_LEN) - 1)
-#ifndef SMALL_PROGRAM
 #define MAX_OPEN_PATHS_TO_TRACK   (8)
-#else
-#define MAX_OPEN_PATHS_TO_TRACK   (6)
-#endif
 
 typedef struct env_prefix {
     u64 len;
@@ -167,13 +163,7 @@ static __always_inline bool compare_open_filenames(open_filename_t *opened_filen
         return false;
     }
 
-#pragma unroll(MAX_OPEN_PATHNAME_MASK)
-    for (int i = 0; i < (len & MAX_OPEN_PATHNAME_MASK); i++) {
-        if (opened_filename->buf[i] != configured_filename->buf[i]) {
-            return false;
-        }
-    }
-    return true;
+    return __bpf_memcmp(opened_filename->buf, configured_filename->buf, MAX_OPEN_PATHNAME_LEN);
 }
 
 static __always_inline bool compare_exec_filenames(exec_filename_t *executed_filename, exec_filename_t *configured_filename) {
