@@ -157,7 +157,7 @@ func TestDetector(t *testing.T) {
 			name:           "process executable is filtered",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        "/usr/bin/bash",
-			args:           []string{"-c", "echo hello"},
+			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
 			shouldDetect:   false,
 		},
 	}

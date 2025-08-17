@@ -141,6 +141,9 @@ func (p *Probe) setConfigMapSpec(spec *ebpf.CollectionSpec, ns uint32) error {
 	if err := features.HaveMapFlag(features.BPF_F_RDONLY_PROG); err == nil {
 		// If the kernel supports BPF_F_RDONLY_PROG, we can set the map
 		// to be read-only - this is supported from kernel 5.2 and later.
+		// This is done to approximate the behavior of `const volatile` variables usually declared in eBPF programs.
+		// Theses are created using a `.rodata` section which is turned into a read-only map.
+		// Here we're creating the same behavior only when the kernel supports it and avoiding loading errors on older kernels.
 		ms.Flags |= features.BPF_F_RDONLY_PROG
 	}
 
