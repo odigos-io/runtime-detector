@@ -13,7 +13,7 @@ import (
 	"github.com/cilium/ebpf"
 )
 
-type bpfDetectorConfigT struct {
+type bpf_smallDetectorConfigT struct {
 	_                    structs.HostLayout
 	ConfiguredPidNsInode uint32
 	Padding              [4]uint8
@@ -22,46 +22,46 @@ type bpfDetectorConfigT struct {
 	Padding2             [6]uint8
 }
 
-type bpfEnvPrefixT struct {
+type bpf_smallEnvPrefixT struct {
 	_      structs.HostLayout
 	Len    uint64
 	Prefix [16]uint8
 }
 
-type bpfExecFilenameT struct {
+type bpf_smallExecFilenameT struct {
 	_   structs.HostLayout
 	Len uint64
 	Buf [64]uint8
 }
 
-type bpfOpenFilenameT struct {
+type bpf_smallOpenFilenameT struct {
 	_   structs.HostLayout
 	Len uint64
 	Buf [128]uint8
 }
 
-// loadBpf returns the embedded CollectionSpec for bpf.
-func loadBpf() (*ebpf.CollectionSpec, error) {
-	reader := bytes.NewReader(_BpfBytes)
+// loadBpf_small returns the embedded CollectionSpec for bpf_small.
+func loadBpf_small() (*ebpf.CollectionSpec, error) {
+	reader := bytes.NewReader(_Bpf_smallBytes)
 	spec, err := ebpf.LoadCollectionSpecFromReader(reader)
 	if err != nil {
-		return nil, fmt.Errorf("can't load bpf: %w", err)
+		return nil, fmt.Errorf("can't load bpf_small: %w", err)
 	}
 
 	return spec, err
 }
 
-// loadBpfObjects loads bpf and converts it into a struct.
+// loadBpf_smallObjects loads bpf_small and converts it into a struct.
 //
 // The following types are suitable as obj argument:
 //
-//	*bpfObjects
-//	*bpfPrograms
-//	*bpfMaps
+//	*bpf_smallObjects
+//	*bpf_smallPrograms
+//	*bpf_smallMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBpfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
-	spec, err := loadBpf()
+func loadBpf_smallObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+	spec, err := loadBpf_small()
 	if err != nil {
 		return err
 	}
@@ -69,19 +69,19 @@ func loadBpfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 	return spec.LoadAndAssign(obj, opts)
 }
 
-// bpfSpecs contains maps and programs before they are loaded into the kernel.
+// bpf_smallSpecs contains maps and programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
-type bpfSpecs struct {
-	bpfProgramSpecs
-	bpfMapSpecs
-	bpfVariableSpecs
+type bpf_smallSpecs struct {
+	bpf_smallProgramSpecs
+	bpf_smallMapSpecs
+	bpf_smallVariableSpecs
 }
 
-// bpfProgramSpecs contains programs before they are loaded into the kernel.
+// bpf_smallProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
-type bpfProgramSpecs struct {
+type bpf_smallProgramSpecs struct {
 	TracepointSchedSchedProcessExit    *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpenat   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_openat"`
@@ -89,10 +89,10 @@ type bpfProgramSpecs struct {
 	TracepointBtfSchedSchedProcessFork *ebpf.ProgramSpec `ebpf:"tracepoint_btf__sched__sched_process_fork"`
 }
 
-// bpfMapSpecs contains maps before they are loaded into the kernel.
+// bpf_smallMapSpecs contains maps before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
-type bpfMapSpecs struct {
+type bpf_smallMapSpecs struct {
 	DetectorConfig        *ebpf.MapSpec `ebpf:"detector_config"`
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
@@ -102,32 +102,32 @@ type bpfMapSpecs struct {
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
 }
 
-// bpfVariableSpecs contains global variables before they are loaded into the kernel.
+// bpf_smallVariableSpecs contains global variables before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
-type bpfVariableSpecs struct {
+type bpf_smallVariableSpecs struct {
 }
 
-// bpfObjects contains all objects after they have been loaded into the kernel.
+// bpf_smallObjects contains all objects after they have been loaded into the kernel.
 //
-// It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
-type bpfObjects struct {
-	bpfPrograms
-	bpfMaps
-	bpfVariables
+// It can be passed to loadBpf_smallObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_smallObjects struct {
+	bpf_smallPrograms
+	bpf_smallMaps
+	bpf_smallVariables
 }
 
-func (o *bpfObjects) Close() error {
-	return _BpfClose(
-		&o.bpfPrograms,
-		&o.bpfMaps,
+func (o *bpf_smallObjects) Close() error {
+	return _Bpf_smallClose(
+		&o.bpf_smallPrograms,
+		&o.bpf_smallMaps,
 	)
 }
 
-// bpfMaps contains all maps after they have been loaded into the kernel.
+// bpf_smallMaps contains all maps after they have been loaded into the kernel.
 //
-// It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
-type bpfMaps struct {
+// It can be passed to loadBpf_smallObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_smallMaps struct {
 	DetectorConfig        *ebpf.Map `ebpf:"detector_config"`
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
@@ -137,8 +137,8 @@ type bpfMaps struct {
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
 }
 
-func (m *bpfMaps) Close() error {
-	return _BpfClose(
+func (m *bpf_smallMaps) Close() error {
+	return _Bpf_smallClose(
 		m.DetectorConfig,
 		m.EnvPrefix,
 		m.Events,
@@ -149,16 +149,16 @@ func (m *bpfMaps) Close() error {
 	)
 }
 
-// bpfVariables contains all global variables after they have been loaded into the kernel.
+// bpf_smallVariables contains all global variables after they have been loaded into the kernel.
 //
-// It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
-type bpfVariables struct {
+// It can be passed to loadBpf_smallObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_smallVariables struct {
 }
 
-// bpfPrograms contains all programs after they have been loaded into the kernel.
+// bpf_smallPrograms contains all programs after they have been loaded into the kernel.
 //
-// It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
-type bpfPrograms struct {
+// It can be passed to loadBpf_smallObjects or ebpf.CollectionSpec.LoadAndAssign.
+type bpf_smallPrograms struct {
 	TracepointSchedSchedProcessExit    *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpenat   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_openat"`
@@ -166,8 +166,8 @@ type bpfPrograms struct {
 	TracepointBtfSchedSchedProcessFork *ebpf.Program `ebpf:"tracepoint_btf__sched__sched_process_fork"`
 }
 
-func (p *bpfPrograms) Close() error {
-	return _BpfClose(
+func (p *bpf_smallPrograms) Close() error {
+	return _Bpf_smallClose(
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSyscallsSysEnterExecve,
 		p.TracepointSyscallsSysEnterOpenat,
@@ -176,7 +176,7 @@ func (p *bpfPrograms) Close() error {
 	)
 }
 
-func _BpfClose(closers ...io.Closer) error {
+func _Bpf_smallClose(closers ...io.Closer) error {
 	for _, closer := range closers {
 		if err := closer.Close(); err != nil {
 			return err
@@ -187,5 +187,5 @@ func _BpfClose(closers ...io.Closer) error {
 
 // Do not access this directly.
 //
-//go:embed bpf_arm64_bpfel.o
-var _BpfBytes []byte
+//go:embed bpf_small_arm64_bpfel.o
+var _Bpf_smallBytes []byte

@@ -18,7 +18,11 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 // The maximum length of the prefix we are looking for in the environment variables.
 #define MAX_ENV_PREFIX_LEN        (16)
 #define MAX_ENV_PREFIX_MASK       ((MAX_ENV_PREFIX_LEN) - 1)
+#ifndef SMALL_PROGRAM
 #define MAX_ENV_VARS              (1536)
+#else
+#define MAX_ENV_VARS              (128)
+#endif
 
 // The maximum length of the executable pathname to filter out.
 #define MAX_EXEC_PATHNAME_LEN     (64)
@@ -52,13 +56,27 @@ typedef struct {
     u8  buf[MAX_EXEC_PATHNAME_LEN];
 } exec_filename_t;
 
-// injected by the user space code, indicating how many paths are configured to track in the open probe,
-// must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
-volatile const u8 num_open_paths_to_track = 0;
+typedef struct {
+    // This is the inode number of the PID namespace we are interested in.
+    // It is set by the userspace code.
+    u32 configured_pid_ns_inode;
+    u8 padding[4];
 
-// injected by the user space code, indicating how many paths are configured
-// to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
-volatile const u8 num_exec_paths_to_filter = 0;
+    // injected by the user space code, indicating how many paths are configured to track in the open probe,
+    // must be less than or equal to MAX_OPEN_PATHS_TO_TRACK
+    u8 num_open_paths_to_track;
+    // injected by the user space code, indicating how many paths are configured
+    // to be filtered out in the exec probe, must be less than or equal to MAX_EXEC_PATHS_TO_FILTER
+    u8 num_exec_paths_to_filter;
+    u8 padding2[6];
+} detector_config_t;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, u32);
+    __type(value, detector_config_t);
+    __uint(max_entries, 1);
+} detector_config SEC(".maps");
 
 // Used to store the paths configured to be tracked for relevant processes when open occurs.
 struct {
@@ -112,10 +130,6 @@ typedef struct process_event {
     u32 pid;
 } process_event_t;
 
-// This is the inode number of the PID namespace we are interested in.
-// It is set by the userspace code.
-volatile const u32 configured_pid_ns_inode = 0;
-
 // return the configured env prefix for filtering, or NULL if invalid
 static __always_inline env_prefix_t *get_env_prefix() {
     u32 key = 0;
@@ -123,14 +137,12 @@ static __always_inline env_prefix_t *get_env_prefix() {
     env_prefix_t *configured_prefix = bpf_map_lookup_elem(&env_prefix, &key);
 
     if (!configured_prefix) {
-        bpf_printk("Env prefix not configured\n");
         return NULL;
     }
 
     // the user space code should validate that the prefix is not longer than MAX_ENV_PREFIX_LEN as well.
     u64 len = configured_prefix->len;
     if (len > MAX_ENV_PREFIX_LEN) {
-        bpf_printk("Env prefix is too long: %lld\n", len);
         return NULL;
     }
 
@@ -151,12 +163,7 @@ static __always_inline bool compare_open_filenames(open_filename_t *opened_filen
         return false;
     }
 
-    for (int i = 0; i < (len & MAX_OPEN_PATHNAME_MASK); i++) {
-        if (opened_filename->buf[i] != configured_filename->buf[i]) {
-            return false;
-        }
-    }
-    return true;
+    return __bpf_memcmp(opened_filename->buf, configured_filename->buf, MAX_OPEN_PATHNAME_LEN);
 }
 
 static __always_inline bool compare_exec_filenames(exec_filename_t *executed_filename, exec_filename_t *configured_filename) {
@@ -169,12 +176,7 @@ static __always_inline bool compare_exec_filenames(exec_filename_t *executed_fil
         return false;
     }
 
-    for (int i = 0; i < (len & MAX_EXEC_PATHNAME_MASK); i++) {
-        if (executed_filename->buf[i] != configured_filename->buf[i]) {
-            return false;
-        }
-    }
-    return true;
+    return __bpf_memcmp(executed_filename->buf, configured_filename->buf, MAX_EXEC_PATHNAME_LEN);
 }
 
 typedef struct pids_in_ns {
@@ -186,18 +188,27 @@ typedef struct pids_in_ns {
 
 #ifndef NO_BTF
 static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids) {
-    struct upid upid =     {0};
-    u32 inum =              0;
-    u32 selected_pid =      0;
-    unsigned int level =    BPF_CORE_READ(task, thread_pid, level);
-    unsigned int num_pids = level + 1;
-    bool found =            false;
+    struct upid upid =         {0};
+    u32 inum =                  0;
+    u32 selected_pid =          0;
+    unsigned int level =        BPF_CORE_READ(task, thread_pid, level);
+    unsigned int num_pids =     level + 1;
+    bool found =                false;
+    detector_config_t *config = NULL;
+    u32 zero_key =              0;
 
     if (num_pids > MAX_NS_FOR_PID) {
-        bpf_printk("Number of PIDs is greater than supported: %d", num_pids);
         num_pids = MAX_NS_FOR_PID;
     }
 
+    config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return -1;
+    }
+
+    u32 configured_pid_ns_inode = config->configured_pid_ns_inode;
+
+#pragma unroll(MAX_NS_FOR_PID)
     for (int i = 0; i < num_pids && i < MAX_NS_FOR_PID; i++) {
         upid = BPF_CORE_READ(task, thread_pid, numbers[i]);
         inum = BPF_CORE_READ(upid.ns, ns.inum);
@@ -233,7 +244,13 @@ static __always_inline bool is_executable_ignored(const char *filename) {
     executed_filename.len = bytes_read - 1;
     exec_filename_t *configured_filename = NULL;
 
-    u32 num_paths = num_exec_paths_to_filter < MAX_EXEC_PATHS_TO_FILTER ? num_exec_paths_to_filter : MAX_EXEC_PATHS_TO_FILTER;
+    u32 zero_key = 0;
+    detector_config_t *config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return false;
+    }
+
+    u32 num_paths = config->num_exec_paths_to_filter;
     u32 idx = 0;
     for (u32 i = 0; i < num_paths; i++) {
         idx = i;
@@ -282,12 +299,11 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     u32 size_to_read = configured_prefix->len;
     if (size_to_read > MAX_ENV_PREFIX_LEN) {
         // user space should validate the env prefix passed, this should not happen if user space verifies the prefix length
-        bpf_printk("Configured prefix length is too long: %lld", size_to_read);
         return 0;
     }
 
     int i = 0;
-    #pragma unroll
+#pragma unroll
     for (; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &envp[i]);
         if (ret < 0) {
@@ -317,11 +333,13 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     // 2. We failed to read one of the environment variables, and are not certain whether the process is relevant or not.
     // 3. Scanned the first MAX_ENV_VARS environment variables and did not find a relevant one - no certainty that the process is relevant or not.
 
+#ifndef SMALL_PROGRAM
     // check if the executed file is in the list of files to ignore
     const char *filename = (const char *)(ctx->args[0]);
     if (is_executable_ignored(filename)) {
         return 0;
     }
+#endif
 
     pid_tgid = bpf_get_current_pid_tgid();
     pid =  (u32)(pid_tgid & 0xFFFFFFFF);
@@ -333,20 +351,17 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids);
     if (ret < 0) {
-        bpf_printk("Could not find PID for task: 0x%llx", bpf_get_current_pid_tgid());
         return 0;
     }
 #endif
 
     ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret);
         return 0;
     }
 
     ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
     if (ret != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret);
         return 0;
     }
 
@@ -403,21 +418,18 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
 
     ret_code = get_pid_for_configured_ns(child, &pids);
     if (ret_code < 0) {
-        bpf_printk("Could not find PID for task: 0x%llx", child_pid);
         return 0;
     }
 
     // track this child pid
     ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
         return 0;
     }
 
     // populate the map with the container pid, so that user space can read it
     ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
         return 0;
     }
 
@@ -448,7 +460,6 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     u32 unknown_pid = 0;
     ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &child_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update PID to NS PID map: %d", ret_code);
         return 0;
     }
 
@@ -456,7 +467,6 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     // since we don't have BTF here, we can't get the last level pid
     ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &child_pid, &unknown_pid, BPF_ANY);
     if (ret_code != 0) {
-        bpf_printk("Failed to update user PID to container PID map: %d", ret_code);
         return 0;
     }
 
@@ -502,10 +512,21 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     opened_filename.len = bytes_read - 1;
     open_filename_t *configured_filename = NULL;
 
-    u32 num_paths = num_open_paths_to_track < MAX_OPEN_PATHS_TO_TRACK ? num_open_paths_to_track : MAX_OPEN_PATHS_TO_TRACK;
+    u32 zero_key = 0;
+    detector_config_t *config = bpf_map_lookup_elem(&detector_config, &zero_key);
+    if (config == NULL) {
+        return 0;
+    }
+
+    u32 num_paths = config->num_open_paths_to_track;
 
     // go over the configured relevant paths and check if the opened file matches any of them
-    for (u32 i = 0; i < num_paths; i++) {
+#pragma unroll(MAX_OPEN_PATHS_TO_TRACK)
+    for (u32 i = 0; i < MAX_OPEN_PATHS_TO_TRACK; i++) {
+        if (i >= num_paths) {
+            break;
+        }
+
         u32 idx = i;
         configured_filename = bpf_map_lookup_elem(&files_open_to_track, &idx);
         if (configured_filename == NULL) {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf/features"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,6 +66,8 @@ type testCase struct {
 	shouldDetect      bool
 	expectedEvents    []ProcessEventType
 	minDurationFilter *time.Duration
+
+	skipTest func(t *testing.T) bool
 }
 
 func TestDetector(t *testing.T) {
@@ -157,13 +160,22 @@ func TestDetector(t *testing.T) {
 			name:           "process executable is filtered",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        "/usr/bin/bash",
-			args:           []string{"-c", "echo hello"},
+			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
 			shouldDetect:   false,
+
+			// When the kernel doesn't support bounded loops, we exclude the eBPF code that checks for the executable path.
+			// This is temporary until we have an additional check in user space to filter out the executable.
+			skipTest: func(t *testing.T) bool {
+				return features.HaveBoundedLoops() != nil
+			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.skipTest != nil && tc.skipTest(t) {
+				t.Skipf("Skipping test %s", tc.name)
+			}
 			events := make(chan ProcessEvent, 100)
 
 			// Compile the test program if it's a Go program

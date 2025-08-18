@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/features"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
@@ -19,6 +20,9 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf ./ebpf/detector.bpf.c
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_no_btf ./ebpf/detector.bpf.c -- -DNO_BTF -DBPF_NO_PRESERVE_ACCESS_INDEX
+
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_small ./ebpf/detector.bpf.c -- -DSMALL_PROGRAM
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 -cc clang -cflags $CFLAGS bpf_small_no_btf ./ebpf/detector.bpf.c -- -DNO_BTF -DBPF_NO_PRESERVE_ACCESS_INDEX -DSMALL_PROGRAM
 
 type Probe struct {
 	logger *slog.Logger
@@ -43,23 +47,20 @@ type processEvent struct {
 const (
 	PerfBufferDefaultSizeInPages = 128
 
-	eventsMapName               = "events"
-	execveSyscallProgramName    = "tracepoint__syscalls__sys_enter_execve"
+	eventsMapName                = "events"
+	execveSyscallProgramName     = "tracepoint__syscalls__sys_enter_execve"
 	execveSyscallExitProgramName = "tracepoint__syscalls__sys_exit_execve"
-	processForkNoBTFProgramName = "tracepoint__sched__sched_process_fork"
-	processForkProgramName      = "tracepoint_btf__sched__sched_process_fork"
-	processExitProgramName      = "tracepoint__sched__sched_process_exit"
-	pidToContainerPIDMapName    = "user_pid_to_container_pid"
-	envPrefixMapName            = "env_prefix"
+	processForkNoBTFProgramName  = "tracepoint__sched__sched_process_fork"
+	processForkProgramName       = "tracepoint_btf__sched__sched_process_fork"
+	processExitProgramName       = "tracepoint__sched__sched_process_exit"
+	pidToContainerPIDMapName     = "user_pid_to_container_pid"
+	envPrefixMapName             = "env_prefix"
 
-	fileOpenProgramName          = "tracepoint__syscalls__sys_enter_openat"
-	openTrackingFilenameMapName  = "files_open_to_track"
-	numOpenPathsToTrackConstName = "num_open_paths_to_track"
+	fileOpenProgramName         = "tracepoint__syscalls__sys_enter_openat"
+	openTrackingFilenameMapName = "files_open_to_track"
 
-	execFilesToFilterMapName      = "exec_files_to_filter"
-	numExecFilesToIgnoreConstName = "num_exec_paths_to_filter"
-
-	userNamespaceInodeConstName = "configured_pid_ns_inode"
+	execFilesToFilterMapName = "exec_files_to_filter"
+	detectorConfigMapName    = "detector_config"
 )
 
 type Config struct {
@@ -107,51 +108,50 @@ func (p *Probe) LoadAndAttach() error {
 	return nil
 }
 
-func (p *Probe) setSpecConsts(spec *ebpf.CollectionSpec, ns uint32) error {
-	v, ok := spec.Variables[userNamespaceInodeConstName]
+// setConfigMapSpec rewrites the config map in the eBPF collection spec with the provided values
+// to the probe. If the kernel supports read-only maps, it sets the map to be read-only.
+func (p *Probe) setConfigMapSpec(spec *ebpf.CollectionSpec, ns uint32) error {
+	ms, ok := spec.Maps[detectorConfigMapName]
 	if !ok {
-		return fmt.Errorf("constant %s not found", userNamespaceInodeConstName)
-	}
-	if !v.Constant() {
-		return fmt.Errorf("variable %s is not a constant", userNamespaceInodeConstName)
-	}
-	if err := v.Set(ns); err != nil {
-		return fmt.Errorf("rewriting constant %s: %w", userNamespaceInodeConstName, err)
+		return fmt.Errorf("map %s not found", detectorConfigMapName)
 	}
 
-	v, ok = spec.Variables[numOpenPathsToTrackConstName]
-	if !ok {
-		return fmt.Errorf("constant %s not found", numOpenPathsToTrackConstName)
-	}
-	if !v.Constant() {
-		return fmt.Errorf("variable %s is not a constant", numOpenPathsToTrackConstName)
-	}
 	if len(p.openFilesToTrack) > math.MaxUint8 {
 		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.openFilesToTrack), math.MaxUint8)
 	}
-	if err := v.Set(uint8(len(p.openFilesToTrack))); err != nil {
-		return fmt.Errorf("rewriting constant %s: %w", numOpenPathsToTrackConstName, err)
-	}
 
-	v, ok = spec.Variables[numExecFilesToIgnoreConstName]
-	if !ok {
-		return fmt.Errorf("constant %s not found", numExecFilesToIgnoreConstName)
-	}
-	if !v.Constant() {
-		return fmt.Errorf("variable %s is not a constant", numExecFilesToIgnoreConstName)
-	}
 	if len(p.execFilesToFilter) > math.MaxUint8 {
 		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.execFilesToFilter), math.MaxUint8)
 	}
-	if err := v.Set(uint8(len(p.execFilesToFilter))); err != nil {
-		return fmt.Errorf("rewriting constant %s: %w", numExecFilesToIgnoreConstName, err)
+
+	key := uint32(0)
+	value := bpfDetectorConfigT{
+		ConfiguredPidNsInode: ns,
+		NumOpenPathsToTrack:  uint8(len(p.openFilesToTrack)),
+		NumExecPathsToFilter: uint8(len(p.execFilesToFilter)),
+	}
+
+	ms.Contents = []ebpf.MapKV{
+		{
+			Key:   key,
+			Value: value,
+		},
+	}
+
+	if err := features.HaveMapFlag(features.BPF_F_RDONLY_PROG); err == nil {
+		// If the kernel supports BPF_F_RDONLY_PROG, we can set the map
+		// to be read-only - this is supported from kernel 5.2 and later.
+		// This is done to approximate the behavior of `const volatile` variables usually declared in eBPF programs.
+		// Theses are created using a `.rodata` section which is turned into a read-only map.
+		// Here we're creating the same behavior only when the kernel supports it and avoiding loading errors on older kernels.
+		ms.Flags |= features.BPF_F_RDONLY_PROG
 	}
 
 	return nil
 }
 
 func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Collection, error) {
-	err := p.setSpecConsts(spec, ns)
+	err := p.setConfigMapSpec(spec, ns)
 	if err != nil {
 		return nil, fmt.Errorf("can't rewrite constants: %w", err)
 	}
@@ -178,7 +178,16 @@ func (p *Probe) load(ns uint32) error {
 		return err
 	}
 
-	spec, err := loadBpf()
+	withBTFSpecFn := loadBpf
+	withoutBTFSpecFn := loadBpf_no_btf
+	smallProgRequired := (features.HaveBoundedLoops() != nil)
+	if smallProgRequired {
+		p.logger.Warn("kernel does not support bounded loops, loading small eBPF program")
+		withBTFSpecFn = loadBpf_small
+		withoutBTFSpecFn = loadBpf_small_no_btf
+	}
+
+	spec, err := withBTFSpecFn()
 	if err != nil {
 		return err
 	}
@@ -192,7 +201,7 @@ func (p *Probe) load(ns uint32) error {
 		// BTF is not supported, fallback to eBPF without BTF
 		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
 		p.btfDisabled = true
-		spec, err = loadBpf_no_btf()
+		spec, err = withoutBTFSpecFn()
 		if err != nil {
 			return err
 		}
