@@ -102,6 +102,7 @@ type detectorConfig struct {
 	envPrefixFilter  string
 	exePathsToFilter map[string]struct{}
 	filesOpenTrigger []string
+	procFSPath       string
 }
 
 var (
@@ -136,6 +137,10 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 	c, err := newConfig(opts)
 	if err != nil {
 		return nil, err
+	}
+
+	if c.procFSPath != "" {
+		proc.SetProcFSPath(c.procFSPath)
 	}
 
 	procEvents := make(chan common.PIDEvent, 100)
@@ -420,6 +425,19 @@ func WithExePathsToFilter(paths ...string) DetectorOption {
 func WithFilesOpenTrigger(files ...string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		c.filesOpenTrigger = files
+		return c, nil
+	})
+}
+
+// WithProcFSPath returns a [DetectorOption] that configures a [Detector] to use the specified path for the /proc filesystem.
+// This is useful for containers that want to avoid sharing the host PID namespace but still inspect the host processes.
+// The default value is "/proc", which is the standard location for the proc filesystem on Linux systems.
+func WithProcFSPath(path string) DetectorOption {
+	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
+		if path == "" {
+			return c, fmt.Errorf("procFSPath cannot be empty")
+		}
+		c.procFSPath = path
 		return c, nil
 	})
 }

@@ -36,6 +36,11 @@ func main() {
 		),
 	}
 
+	procFS, ok := os.LookupEnv("HOST_PROCFS")
+	if ok && procFS != "" {
+		opts = append(opts, detector.WithProcFSPath(procFS))
+	}
+
 	details := make(chan detector.ProcessEvent)
 	done := make(chan struct{})
 	go func() {

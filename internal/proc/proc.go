@@ -20,7 +20,12 @@ func procFile(pid int, filename string) string {
 	return fmt.Sprintf("%s/%d/%s", procFS, pid, filename)
 }
 
-func GetCurrentPIDNameSpaceIndoe() (uint32, error) {
+// SetProcFSPath allows to set the path to the proc filesystem.
+func SetProcFSPath(path string) {
+	procFS = path
+}
+
+func GetHostPIDNameSpaceIndoe() (uint32, error) {
 	// look at the pid namespace of the root process
 	path := procFile(1, "ns/pid")
 	content, err := os.Readlink(path)
