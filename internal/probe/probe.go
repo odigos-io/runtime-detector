@@ -92,9 +92,9 @@ func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
 
 func (p *Probe) LoadAndAttach() error {
 	// find the PID namespace inode
-	pidNS, err := proc.GetCurrentPIDNameSpaceIndoe()
+	pidNS, err := proc.GetHostPIDNameSpaceIndoe()
 	if err != nil {
-		return fmt.Errorf("can't get current PID namespace inode: %w", err)
+		return fmt.Errorf("can't get host PID namespace inode: %w", err)
 	}
 
 	if err := p.load(pidNS); err != nil {
