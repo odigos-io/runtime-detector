@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cilium/ebpf/features"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -162,12 +161,13 @@ func TestDetector(t *testing.T) {
 			exePath:        "/usr/bin/bash",
 			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
 			shouldDetect:   false,
-
-			// When the kernel doesn't support bounded loops, we exclude the eBPF code that checks for the executable path.
-			// This is temporary until we have an additional check in user space to filter out the executable.
-			skipTest: func(t *testing.T) bool {
-				return features.HaveBoundedLoops() != nil
-			},
+		},
+		{
+			name:           "bash script is filtered",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        "test/script.sh",
+			args:           []string{},
+			shouldDetect:   false,
 		},
 	}
 
