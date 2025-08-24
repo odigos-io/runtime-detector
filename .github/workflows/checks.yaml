@@ -19,7 +19,5 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '${{ env.go_version }}'
-    - name: Run linters
-      run: make golangci-lint-fix
-    - name: Check clean repository
-      run: make check-clean-work-tree
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v8
