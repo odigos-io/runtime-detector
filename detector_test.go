@@ -70,18 +70,16 @@ type testCase struct {
 }
 
 func TestDetector(t *testing.T) {
-	testDir, err := os.MkdirTemp("", "detector-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(testDir)
+	testDir := t.TempDir()
 
 	// Create a test file that will be opened by processes
 	testFile := filepath.Join(testDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("test"), 0644)
+	err := os.WriteFile(testFile, []byte("test"), 0o600)
 	require.NoError(t, err)
 
 	// Create a second test file for the multi-file test
 	testFile2 := filepath.Join(testDir, "test2.txt")
-	err = os.WriteFile(testFile2, []byte("test2"), 0644)
+	err = os.WriteFile(testFile2, []byte("test2"), 0o600)
 	require.NoError(t, err)
 	defer os.Remove(testFile2)
 
@@ -159,8 +157,11 @@ func TestDetector(t *testing.T) {
 			name:           "process executable is filtered",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        "/usr/bin/bash",
-			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
-			shouldDetect:   false,
+			args: []string{
+				"-c",
+				"start=$SECONDS; while (( SECONDS - start < 1 )); do :; done",
+			},
+			shouldDetect: false,
 		},
 		{
 			name:           "bash script is filtered",
@@ -180,7 +181,13 @@ func TestDetector(t *testing.T) {
 
 			// Compile the test program if it's a Go program
 			if strings.HasPrefix(tc.exePath, testDir) {
-				cmd := exec.Command("go", "build", "-o", tc.exePath, "./test/go_processes/"+filepath.Base(tc.exePath)+"/main.go")
+				cmd := exec.Command(
+					"go",
+					"build",
+					"-o",
+					tc.exePath,
+					"./test/go_processes/"+filepath.Base(tc.exePath)+"/main.go",
+				)
 				err := cmd.Run()
 				require.NoError(t, err)
 				defer os.Remove(tc.exePath)
@@ -260,15 +267,31 @@ func TestDetector(t *testing.T) {
 			}
 
 			// Verify we received the expected events
-			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+			if !assert.Len(
+				t,
+				receivedEvents,
+				len(tc.expectedEvents),
+				"unexpected number of events",
+			) {
 				t.Logf("received events: %v\n", receivedEvents)
 				return
 			}
 
 			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
+				assert.Equal(
+					t,
+					tc.expectedEvents[i].String(),
+					event.EventType.String(),
+					"unexpected event type for the event %d",
+					i,
+				)
 				if event.ExecDetails != nil {
-					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+					assert.Equal(
+						t,
+						tc.exePath,
+						event.ExecDetails.ExePath,
+						"unexpected executable path",
+					)
 
 					var envVarsToAssert map[string]string
 					if len(tc.envVarsToAssert) > 0 {
@@ -279,7 +302,12 @@ func TestDetector(t *testing.T) {
 
 					if len(envVarsToAssert) > 0 {
 						for k, v := range envVarsToAssert {
-							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
+							assert.Equal(
+								t,
+								v,
+								event.ExecDetails.Environments[k],
+								"unexpected environment variable value",
+							)
 						}
 					}
 				}
@@ -294,8 +322,10 @@ func TestDetectorInitialScan(t *testing.T) {
 			name:           "initial scan - basic process with user env",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        "/usr/bin/sleep",
-			args:           []string{"10"}, // Long sleep to keep process alive, we'll kill it before it exits
-			shouldDetect:   true,
+			args: []string{
+				"10",
+			}, // Long sleep to keep process alive, we'll kill it before it exits
+			shouldDetect: true,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent, // exec event for initial scan
 				ProcessExitEvent, // exit event after the process ends
@@ -400,15 +430,31 @@ func TestDetectorInitialScan(t *testing.T) {
 			}
 
 			// Verify we received the expected events
-			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+			if !assert.Len(
+				t,
+				receivedEvents,
+				len(tc.expectedEvents),
+				"unexpected number of events",
+			) {
 				t.Logf("received events: %v\n", receivedEvents)
 				return
 			}
 
 			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
+				assert.Equal(
+					t,
+					tc.expectedEvents[i].String(),
+					event.EventType.String(),
+					"unexpected event type for the event %d",
+					i,
+				)
 				if event.ExecDetails != nil {
-					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+					assert.Equal(
+						t,
+						tc.exePath,
+						event.ExecDetails.ExePath,
+						"unexpected executable path",
+					)
 
 					var envVarsToAssert map[string]string
 					if len(tc.envVarsToAssert) > 0 {
@@ -419,7 +465,12 @@ func TestDetectorInitialScan(t *testing.T) {
 
 					if len(envVarsToAssert) > 0 {
 						for k, v := range envVarsToAssert {
-							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
+							assert.Equal(
+								t,
+								v,
+								event.ExecDetails.Environments[k],
+								"unexpected environment variable value",
+							)
 						}
 					}
 				}

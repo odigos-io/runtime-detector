@@ -3,8 +3,29 @@
 REPODIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 BPF_INCLUDE += -I${REPODIR}/internal/headers
+TOOLS_MOD_DIR := ./internal/tools
+TOOLS = $(CURDIR)/.tools
 
-ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' ! -path './LICENSES/*' -exec dirname {} \; | sort)
+$(TOOLS):
+	@mkdir -p $@
+$(TOOLS)/%: | $(TOOLS)
+	cd $(TOOLS_MOD_DIR) && \
+	go build  -buildvcs=false -o $@ $(PACKAGE)
+
+GOLANGCI_LINT = $(TOOLS)/golangci-lint
+$(TOOLS)/golangci-lint: PACKAGE=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+
+ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' ! -path './internal/tools/*' -exec dirname {} \; | sort)
+
+.PHONY: golangci-lint golangci-lint-fix
+golangci-lint-fix: ARGS=--fix
+golangci-lint-fix: golangci-lint
+golangci-lint: $(ALL_GO_MOD_DIRS:%=golangci-lint/%)
+golangci-lint/%: DIR=$*
+golangci-lint/%: | $(GOLANGCI_LINT)
+	@echo 'golangci-lint $(if $(ARGS),$(ARGS) ,)$(DIR)' \
+		&& cd $(DIR) \
+		&& $(GOLANGCI_LINT) run --allow-serial-runners --timeout=2m0s $(ARGS)
 
 .PHONY: go-mod-tidy
 go-mod-tidy: $(ALL_GO_MOD_DIRS:%=go-mod-tidy/%)

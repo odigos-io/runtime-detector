@@ -116,19 +116,30 @@ func (p *Probe) setConfigMapSpec(spec *ebpf.CollectionSpec, ns uint32) error {
 		return fmt.Errorf("map %s not found", detectorConfigMapName)
 	}
 
-	if len(p.openFilesToTrack) > math.MaxUint8 {
-		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.openFilesToTrack), math.MaxUint8)
+	numOpenFiles := len(p.openFilesToTrack)
+	numExecFiles := len(p.execFilesToFilter)
+
+	if numOpenFiles > math.MaxUint8 {
+		return fmt.Errorf(
+			"too many files to track being opened: provided %d, max allowed %d",
+			numOpenFiles,
+			math.MaxUint8,
+		)
 	}
 
-	if len(p.execFilesToFilter) > math.MaxUint8 {
-		return fmt.Errorf("too many files to track: provided %d, max allowed %d", len(p.execFilesToFilter), math.MaxUint8)
+	if numExecFiles > math.MaxUint8 {
+		return fmt.Errorf(
+			"too many exec files to filter: provided %d, max allowed %d",
+			numExecFiles,
+			math.MaxUint8,
+		)
 	}
 
 	key := uint32(0)
 	value := bpfDetectorConfigT{
 		ConfiguredPidNsInode: ns,
-		NumOpenPathsToTrack:  uint8(len(p.openFilesToTrack)),
-		NumExecPathsToFilter: uint8(len(p.execFilesToFilter)),
+		NumOpenPathsToTrack:  uint8(numOpenFiles),
+		NumExecPathsToFilter: uint8(numExecFiles),
 	}
 
 	ms.Contents = []ebpf.MapKV{
@@ -165,7 +176,7 @@ func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Co
 	if err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
-			fmt.Printf("Verifier log: %-100v\n", ve)
+			return nil, fmt.Errorf("verifier error %w", ve)
 		}
 		return nil, err
 	}
@@ -199,7 +210,11 @@ func (p *Probe) load(ns uint32) error {
 		}
 
 		// BTF is not supported, fallback to eBPF without BTF
-		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
+		p.logger.Warn(
+			"BTF not supported, loading eBPF without BTF, some of the features will be disabled",
+			"error",
+			err,
+		)
 		p.btfDisabled = true
 		spec, err = withoutBTFSpecFn()
 		if err != nil {
@@ -238,25 +253,43 @@ func (p *Probe) attach() error {
 		return errors.New("no eBPF collection loaded")
 	}
 
-	reader, err := perf.NewReader(p.c.Maps[eventsMapName], PerfBufferDefaultSizeInPages*os.Getpagesize())
+	reader, err := perf.NewReader(
+		p.c.Maps[eventsMapName],
+		PerfBufferDefaultSizeInPages*os.Getpagesize(),
+	)
 	if err != nil {
 		return fmt.Errorf("can't create perf reader: %w", err)
 	}
 	p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
+	l, err := link.Tracepoint(
+		"syscalls",
+		"sys_enter_execve",
+		p.c.Programs[execveSyscallProgramName],
+		nil,
+	)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
 	}
 	p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
+	l, err = link.Tracepoint(
+		"syscalls",
+		"sys_exit_execve",
+		p.c.Programs[execveSyscallExitProgramName],
+		nil,
+	)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
 	}
 	p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
+	l, err = link.Tracepoint(
+		"sched",
+		"sched_process_exit",
+		p.c.Programs[processExitProgramName],
+		nil,
+	)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
 	}
@@ -289,7 +322,12 @@ func (p *Probe) attach() error {
 
 	if len(p.openFilesToTrack) > 0 {
 		// attach to openat syscall
-		l, err = link.Tracepoint("syscalls", "sys_enter_openat", p.c.Programs[fileOpenProgramName], nil)
+		l, err = link.Tracepoint(
+			"syscalls",
+			"sys_enter_openat",
+			p.c.Programs[fileOpenProgramName],
+			nil,
+		)
 		if err != nil {
 			return fmt.Errorf("can't attach probe sys_enter_openat: %w", err)
 		}
@@ -335,6 +373,10 @@ func parseProcessEventInto(record *perf.Record, event *processEvent) error {
 }
 
 func (p *Probe) GetContainerPID(pid int) (int, error) {
+	if pid < 0 || pid > math.MaxUint32 {
+		return 0, fmt.Errorf("invalid PID %d, must be between 0 and %d", pid, math.MaxUint32)
+	}
+
 	m := p.c.Maps[pidToContainerPIDMapName]
 	var containerPID uint32
 	err := m.Lookup(uint32(pid), &containerPID)
@@ -349,6 +391,9 @@ func (p *Probe) TrackPIDs(pids []int) error {
 	m := p.c.Maps[pidToContainerPIDMapName]
 	keys := make([]uint32, len(pids))
 	for i, pid := range pids {
+		if pid < 0 || pid > math.MaxUint32 {
+			return fmt.Errorf("invalid PID %d, must be between 0 and %d", pid, math.MaxUint32)
+		}
 		keys[i] = uint32(pid)
 	}
 

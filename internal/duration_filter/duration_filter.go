@@ -22,7 +22,11 @@ type durationFilter struct {
 	output chan<- common.PIDEvent
 }
 
-func NewDurationFilter(logger *slog.Logger, d time.Duration, output chan<- common.PIDEvent) common.ProcessesFilter {
+func NewDurationFilter(
+	logger *slog.Logger,
+	d time.Duration,
+	output chan<- common.PIDEvent,
+) common.ProcessesFilter {
 	if d == 0 {
 		logger.Info("duration is zero, using passthrough filter")
 		return &passthroughFilter{
@@ -89,7 +93,15 @@ func (df *durationFilter) Add(pid int, eventType common.EventType) {
 		p.t.Stop()
 	}
 
-	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", pid, "eventType", eventType.String())
+	df.logger.Debug(
+		"adding pid",
+		"number of pids",
+		len(df.procs),
+		"pid",
+		pid,
+		"eventType",
+		eventType.String(),
+	)
 	df.procs[pid] = df.launchProcessCountdown(pid, eventType)
 }
 

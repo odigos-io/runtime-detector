@@ -1,7 +1,9 @@
 package probe
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"unsafe"
 )
 
@@ -16,7 +18,11 @@ func (p *Probe) setEnvPrefixFilter() error {
 	prefix := p.envPrefixFilter
 
 	if len(prefix) > maxEnvPrefixLength {
-		return fmt.Errorf("env prefix filter is too long: provide length is %d, max allowed length is %d", len(prefix), maxEnvPrefixLength)
+		return fmt.Errorf(
+			"env prefix filter is too long: provide length is %d, max allowed length is %d",
+			len(prefix),
+			maxEnvPrefixLength,
+		)
 	}
 
 	key := uint32(0)
@@ -38,14 +44,25 @@ func (p *Probe) setFilenamesToTrackWhenOpened() error {
 	}
 
 	if len(p.openFilesToTrack) > int(m.MaxEntries()) {
-		return fmt.Errorf("too many files to track for open: provided %d, max allowed %d", len(p.openFilesToTrack), m.MaxEntries())
+		return fmt.Errorf(
+			"too many files to track for open: provided %d, max allowed %d",
+			len(p.openFilesToTrack),
+			m.MaxEntries(),
+		)
 	}
 
 	for i, filename := range p.openFilesToTrack {
 		if len(filename) > maxOpenFilenameLength {
-			return fmt.Errorf("filename is too long: provide length is %d, max allowed length is %d", len(filename), maxOpenFilenameLength)
+			return fmt.Errorf(
+				"filename is too long: provide length is %d, max allowed length is %d",
+				len(filename),
+				maxOpenFilenameLength,
+			)
 		}
 
+		if i > math.MaxUint32 || i < 0 {
+			return errors.New("overflown index for open files")
+		}
 		key := uint32(i)
 		value := bpfOpenFilenameT{Len: uint64(len(filename))}
 		copy(value.Buf[:], filename)
@@ -66,13 +83,21 @@ func (p *Probe) setExecFilenamesToIgnore() error {
 	}
 
 	if len(p.execFilesToFilter) > int(m.MaxEntries()) {
-		return fmt.Errorf("too many executable files to ignore: provided %d, max allowed %d", len(p.execFilesToFilter), m.MaxEntries())
+		return fmt.Errorf(
+			"too many executable files to ignore: provided %d, max allowed %d",
+			len(p.execFilesToFilter),
+			m.MaxEntries(),
+		)
 	}
 
 	key := uint32(0)
 	for filename := range p.execFilesToFilter {
 		if len(filename) > maxExecFileToIgnoreLen {
-			return fmt.Errorf("executable filename is too long: provide length is %d, max allowed length is %d", len(filename), maxExecFileToIgnoreLen)
+			return fmt.Errorf(
+				"executable filename is too long: provide length is %d, max allowed length is %d",
+				len(filename),
+				maxExecFileToIgnoreLen,
+			)
 		}
 
 		value := bpfExecFilenameT{Len: uint64(len(filename))}

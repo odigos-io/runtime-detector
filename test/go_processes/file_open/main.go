@@ -35,7 +35,7 @@ func main() {
 	file2, err := os.Open(file2Path)
 	if err != nil {
 		fmt.Printf("Error opening second file: %v\n", err)
-		os.Exit(1)
+		os.Exit(1) // nolint: gocritic
 	}
 	defer file2.Close()
 
