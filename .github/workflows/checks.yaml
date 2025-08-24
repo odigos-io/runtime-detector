@@ -19,5 +19,8 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '${{ env.go_version }}'
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y clang llvm
     - name: Run linters
       run: make golangci-lint

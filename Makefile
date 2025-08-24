@@ -20,7 +20,7 @@ ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' ! -path './internal/too
 .PHONY: golangci-lint golangci-lint-fix
 golangci-lint-fix: ARGS=--fix
 golangci-lint-fix: golangci-lint
-golangci-lint: go-mod-tidy $(ALL_GO_MOD_DIRS:%=golangci-lint/%)
+golangci-lint: go-mod-tidy generate $(ALL_GO_MOD_DIRS:%=golangci-lint/%)
 golangci-lint/%: DIR=$*
 golangci-lint/%: | $(GOLANGCI_LINT)
 	@echo 'golangci-lint $(if $(ARGS),$(ARGS) ,)$(DIR)' \
