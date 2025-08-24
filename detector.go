@@ -37,7 +37,7 @@ type Detector struct {
 	filteredPIDs map[int]struct{}
 }
 
-type ProcessEventType int
+type ProcessEventType uint32
 
 const (
 	ProcessExecEvent     ProcessEventType = ProcessEventType(common.EventTypeExec)
@@ -73,7 +73,8 @@ type ProcessEvent struct {
 
 func (pe ProcessEvent) String() string {
 	if pe.ExecDetails != nil {
-		return fmt.Sprintf("%s: PID: %d, ExePath: %s, CmdLine: %s, ContainerPID: %d reported envs: %v",
+		return fmt.Sprintf(
+			"%s: PID: %d, ExePath: %s, CmdLine: %s, ContainerPID: %d reported envs: %v",
 			pe.EventType,
 			pe.PID,
 			pe.ExecDetails.ExePath,
@@ -113,13 +114,11 @@ type detectorConfig struct {
 	procFSPath       string
 }
 
-var (
-	// defaultExcludedExePaths are the executables that we do not want to track
-	defaultExcludedExePaths = []string{
-		// it is common for the kubelet/container-runtime to run a process with the command "/pause",
-		"/pause",
-	}
-)
+// defaultExcludedExePaths are the executables that we do not want to track
+var defaultExcludedExePaths = []string{
+	// it is common for the kubelet/container-runtime to run a process with the command "/pause",
+	"/pause",
+}
 
 // DetectorOption applies a configuration option to [Detector].
 type DetectorOption interface {
@@ -472,7 +471,7 @@ func WithFilesOpenTrigger(files ...string) DetectorOption {
 func WithProcFSPath(path string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		if path == "" {
-			return c, fmt.Errorf("procFSPath cannot be empty")
+			return c, errors.New("procFSPath cannot be empty")
 		}
 		c.procFSPath = path
 		return c, nil
