@@ -19,5 +19,5 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '${{ env.go_version }}'
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v8
+    - name: Run linters
+      run: make golangci-lint
