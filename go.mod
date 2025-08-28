@@ -2,7 +2,7 @@ module github.com/odigos-io/runtime-detector
 
 go 1.24.0
 
-require github.com/cilium/ebpf v0.19.1-0.20250818092626-ae226118949d
+require github.com/cilium/ebpf v0.19.1-0.20250815145053-c9de60689836
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
