@@ -12,7 +12,7 @@ import (
 
 func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-		Level:     slog.LevelInfo,
+		Level: slog.LevelInfo,
 	}))
 }
 
@@ -21,7 +21,16 @@ func main() {
 	l := newLogger()
 	opts := []detector.DetectorOption{
 		detector.WithLogger(l),
-		detector.WithEnvironments("NODE_OPTIONS", "PYTHONPATH", "NODE_VERSION", "PYTHON_VERSION", "JAVA_VERSION", "ODIGOS_POD_NAME", "ODIGOS_CONTAINER_NAME", "ODIGOS_WORKLOAD_NAMESPACE"),
+		detector.WithEnvironments(
+			"NODE_OPTIONS",
+			"PYTHONPATH",
+			"NODE_VERSION",
+			"PYTHON_VERSION",
+			"JAVA_VERSION",
+			"ODIGOS_POD_NAME",
+			"ODIGOS_CONTAINER_NAME",
+			"ODIGOS_WORKLOAD_NAMESPACE",
+		),
 		detector.WithEnvPrefixFilter("ODIGOS_POD_NAME"),
 		detector.WithExePathsToFilter(
 			"/usr/bin/bash",
@@ -46,7 +55,9 @@ func main() {
 	go func() {
 		for d := range details {
 			switch d.EventType {
-			case detector.ProcessExecEvent, detector.ProcessFileOpenEvent, detector.ProcessForkEvent:
+			case detector.ProcessExecEvent,
+				detector.ProcessFileOpenEvent,
+				detector.ProcessForkEvent:
 				l.Info("detected new process",
 					"eventType", d.EventType.String(),
 					"pid", d.PID,

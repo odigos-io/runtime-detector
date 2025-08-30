@@ -12,8 +12,8 @@ import (
 
 var (
 	procFS               = "/proc"
-	ErrorNotK8sProcess   = fmt.Errorf("pod UID and container name not found, not a k8s process")
-	ErrorProcessNotFound = fmt.Errorf("process not found")
+	ErrorNotK8sProcess   = errors.New("pod UID and container name not found, not a k8s process")
+	ErrorProcessNotFound = errors.New("process not found")
 )
 
 func procFile(pid int, filename string) string {
@@ -267,7 +267,7 @@ func isProcessFromReader(r io.Reader) (bool, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return false, fmt.Errorf("failed to read /proc/<pid>/status file %v", err)
+		return false, fmt.Errorf("failed to read /proc/<pid>/status file %w", err)
 	}
 
 	return tgid == pid, nil
@@ -300,7 +300,7 @@ func innerMostPIDFromReader(r io.Reader) (int, error) {
 		if strings.HasPrefix(line, "NStgid:") {
 			parts := strings.Fields(line[len("NStgid:"):])
 			if len(parts) == 0 {
-				return 0, fmt.Errorf("no NStgid values found")
+				return 0, errors.New("no NStgid values found")
 			}
 			// The last value is the inner most PID
 			pid, err := strconv.Atoi(parts[len(parts)-1])
@@ -312,7 +312,7 @@ func innerMostPIDFromReader(r io.Reader) (int, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("failed to read /proc/<pid>/status file %v", err)
+		return 0, fmt.Errorf("failed to read /proc/<pid>/status file %w", err)
 	}
-	return 0, fmt.Errorf("NStgid not found in status file")
+	return 0, errors.New("NStgid not found in status file")
 }

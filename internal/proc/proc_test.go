@@ -58,7 +58,11 @@ func TestGetPodIDContainerNameFromReader(t *testing.T) {
 				t.Errorf("expected podUID: %s, got: %s", tt.expectedPodUID, podUID)
 			}
 			if containerName != tt.expectedContainerName {
-				t.Errorf("expected containerName: %s, got: %s", tt.expectedContainerName, containerName)
+				t.Errorf(
+					"expected containerName: %s, got: %s",
+					tt.expectedContainerName,
+					containerName,
+				)
 			}
 		})
 	}
@@ -174,7 +178,7 @@ func TestParseEnvironments(t *testing.T) {
 	}
 
 	compareEnvs := func(t *testing.T, expected, actual map[string]string) {
-		if !assert.Equal(t, len(expected), len(actual)) {
+		if !assert.Len(t, actual, len(expected)) {
 			return
 		}
 
@@ -185,7 +189,7 @@ func TestParseEnvironments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(string(tt.input))
+			r := strings.NewReader(tt.input)
 			result, err := parseEnvironments(r, tt.keys)
 			assert.NoError(t, err)
 
@@ -206,19 +210,19 @@ func TestExtractNSInode(t *testing.T) {
 
 func TestIsProcess(t *testing.T) {
 	tests := []struct {
-		name     string
-		inputFile    string
-		expected bool
+		name      string
+		inputFile string
+		expected  bool
 	}{
 		{
-			name: "Valid process",
+			name:      "Valid process",
 			inputFile: "./testdata/proc_status_process.txt",
-			expected: true,
+			expected:  true,
 		},
 		{
-			name: "A thread pid",
+			name:      "A thread pid",
 			inputFile: "./testdata/proc_status_thread.txt",
-			expected: false,
+			expected:  false,
 		},
 	}
 
