@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+
 	"github.com/odigos-io/runtime-detector/internal/common"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -210,11 +211,7 @@ func (p *Probe) load(ns uint32) error {
 		}
 
 		// BTF is not supported, fallback to eBPF without BTF
-		p.logger.Warn(
-			"BTF not supported, loading eBPF without BTF, some of the features will be disabled",
-			"error",
-			err,
-		)
+		p.logger.Warn("BTF not supported, loading eBPF without BTF, some of the features will be disabled", "error", err)
 		p.btfDisabled = true
 		spec, err = withoutBTFSpecFn()
 		if err != nil {
