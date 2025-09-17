@@ -59,6 +59,7 @@ typedef struct {
 typedef struct {
     // This is the inode number of the PID namespace we are interested in.
     // It is set by the userspace code.
+    // It may be 0, in that case we will report PIDs as seen by the root ns.
     u32 configured_pid_ns_inode;
     u8 padding[4];
 
@@ -187,7 +188,7 @@ typedef struct pids_in_ns {
 } pids_in_ns_t;
 
 #ifndef NO_BTF
-static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids) {
+static __always_inline long get_pid_for_configured_ns(struct task_struct *task, pids_in_ns_t *pids, u32 host_pid) {
     struct upid upid =         {0};
     u32 inum =                  0;
     u32 selected_pid =          0;
@@ -207,6 +208,10 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
     }
 
     u32 configured_pid_ns_inode = config->configured_pid_ns_inode;
+    if (configured_pid_ns_inode == 0) {
+        pids->configured_ns_pid = host_pid;
+        goto done;
+    }
 
 #pragma unroll(MAX_NS_FOR_PID)
     for (int i = 0; i < num_pids && i < MAX_NS_FOR_PID; i++) {
@@ -223,6 +228,7 @@ static __always_inline long get_pid_for_configured_ns(struct task_struct *task, 
         return -1;
     }
 
+done:
     upid = BPF_CORE_READ(task, thread_pid, numbers[level]);
     pids->last_level_pid = upid.nr;
 
@@ -349,7 +355,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     pids.last_level_pid = 0;
 #else
     task = (struct task_struct *)bpf_get_current_task();
-    ret = get_pid_for_configured_ns(task, &pids);
+    ret = get_pid_for_configured_ns(task, &pids, pid);
     if (ret < 0) {
         return 0;
     }
@@ -416,7 +422,7 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
 
     pids_in_ns_t pids = {0};
 
-    ret_code = get_pid_for_configured_ns(child, &pids);
+    ret_code = get_pid_for_configured_ns(child, &pids, child_pid);
     if (ret_code < 0) {
         return 0;
     }
@@ -577,7 +583,7 @@ int tracepoint__sched__sched_process_exit(struct trace_event_raw_sched_process_e
         pids.last_level_pid = 0;
 #else
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-        ret = get_pid_for_configured_ns(task, &pids);
+        ret = get_pid_for_configured_ns(task, &pids, pid);
         if (ret < 0) {
             // this might happen for processes we are not tracking, and that are not in the configured namespace
             return 0;

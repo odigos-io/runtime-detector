@@ -94,7 +94,13 @@ func (p *Probe) LoadAndAttach() error {
 	// find the PID namespace inode
 	pidNS, err := proc.GetHostPIDNameSpaceIndoe()
 	if err != nil {
-		return fmt.Errorf("can't get host PID namespace inode: %w", err)
+		p.logger.Warn(
+			"failed to get host pid namespace. Processes will be reported with the host pid namespace "+
+				"assuming the host /proc dir is mounted and we can examine the reported events correctly",
+			"error", err,
+		)
+		// making sure the pid ns is set to 0, indicating the eBPF programs to report the host/root ns PID
+		pidNS = 0
 	}
 
 	if err := p.load(pidNS); err != nil {
