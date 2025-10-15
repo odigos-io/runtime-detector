@@ -20,7 +20,7 @@ generate:
 
 .PHONY: docker-generate
 docker-generate:
-	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.8 /bin/sh -c "cd ../app && make generate"
+	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.9 /bin/sh -c "cd ../app && make generate"
 
 .PHONY: docker-test
 docker-test:
@@ -30,7 +30,7 @@ docker-test:
 		-v $(shell pwd):/app \
 		-v /sys/kernel/debug:/sys/kernel/debug \
 		-v /sys/kernel/tracing:/sys/kernel/tracing \
-		keyval/odiglet-base:v1.8 \
+		keyval/odiglet-base:v1.9 \
 		/bin/sh -c "cd ../app && make test"
 
 .PHONY: test

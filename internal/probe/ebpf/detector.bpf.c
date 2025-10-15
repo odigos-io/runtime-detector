@@ -258,7 +258,7 @@ static __always_inline bool is_executable_ignored(const char *filename) {
 
     u32 num_paths = config->num_exec_paths_to_filter;
     u32 idx = 0;
-    for (u32 i = 0; i < num_paths; i++) {
+    for (u32 i = 0; i < num_paths && i < MAX_EXEC_PATHS_TO_FILTER; i++) {
         idx = i;
         configured_filename = bpf_map_lookup_elem(&exec_files_to_filter, &idx);
         if (configured_filename == NULL) {
@@ -309,7 +309,12 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     int i = 0;
+
+    // the small program variant is only used in cases where the kernel does not support bounded loops
+    // and in which we must unroll the loop.
+#ifdef SMALL_PROGRAM
 #pragma unroll
+#endif
     for (; i < MAX_ENV_VARS; i++) {
         ret = bpf_probe_read_user(&argp, sizeof(argp), &envp[i]);
         if (ret < 0) {
@@ -527,12 +532,10 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     u32 num_paths = config->num_open_paths_to_track;
 
     // go over the configured relevant paths and check if the opened file matches any of them
-#pragma unroll(MAX_OPEN_PATHS_TO_TRACK)
-    for (u32 i = 0; i < MAX_OPEN_PATHS_TO_TRACK; i++) {
-        if (i >= num_paths) {
-            break;
-        }
-
+#ifdef SMALL_PROGRAM
+#pragma unroll
+#endif
+    for (u32 i = 0; i < MAX_OPEN_PATHS_TO_TRACK && i < num_paths; i++) {
         u32 idx = i;
         configured_filename = bpf_map_lookup_elem(&files_open_to_track, &idx);
         if (configured_filename == NULL) {
