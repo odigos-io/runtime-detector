@@ -253,24 +253,25 @@ func (d *Detector) procEventLoop() {
 				continue
 			}
 
-			filtered = false
-			filterMsg = ""
-			for _, f := range d.detailsFilters {
-				if f.fn(e.Pid, execDetails) {
-					d.filteredPIDs[e.Pid] = struct{}{}
-					filtered = true
-					filterMsg = f.msg
+			if e.Type == common.EventTypeExec {
+				filtered = false
+				filterMsg = ""
+				for _, f := range d.detailsFilters {
+					if f.fn(e.Pid, execDetails) {
+						d.filteredPIDs[e.Pid] = struct{}{}
+						filtered = true
+						filterMsg = f.msg
+					}
 				}
-			}
-
-			if filtered {
-				d.l.Warn("skipping process event due to details filter",
-					"pid", e.Pid,
-					"reason", filterMsg,
-					"cmdLine", execDetails.CmdLine,
-					"exePath", execDetails.ExePath,
-				)
-				continue
+				if filtered {
+					d.l.Warn("skipping process event due to details filter",
+						"pid", e.Pid,
+						"reason", filterMsg,
+						"cmdLine", execDetails.CmdLine,
+						"exePath", execDetails.ExePath,
+					)
+					continue
+				}
 			}
 
 			pe.ExecDetails = execDetails
@@ -350,6 +351,19 @@ func (d *Detector) Run(ctx context.Context) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
+	return err
+}
+
+// TrackProcesses notifies the detector about a list of relevant processes for which the caller wants to
+// get events for. Future events can be any of the events reported by the detector expect exec event.
+//
+// Will return an error if called before the detector is initialized and running.
+func (d *Detector) TrackProcesses(pids []int) error {
+	if d.p == nil {
+		return errors.New("eBPF probes are not initialized yet, can't track processes before the detector is running")
+	}
+
+	err := d.p.TrackPIDs(pids)
 	return err
 }
 
