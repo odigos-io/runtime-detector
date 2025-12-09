@@ -237,12 +237,20 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 	}, nil
 }
 
-func (d *Detector) procEventLoop() {
-	var (
-		filtered  bool
-		filterMsg string
-	)
+// filter checks if the events assocaited with pid and details should be filtered
+// if it should, true and a message specifying the filtering reason will be returned
+// If it shouldn't, false and an empty string will be returned
+func (d *Detector) shouldFilter(pid int, details ProcessExecDetails) (bool, string) {
+	for _, f := range d.detailsFilters {
+		if f.fn(pid, &details) {
+			d.filteredPIDs[pid] = struct{}{}
+			return true, f.msg
+		}
+	}
+	return false, ""
+}
 
+func (d *Detector) procEventLoop() {
 	for e := range d.procEvents {
 		pe := ProcessEvent{PID: e.Pid}
 		switch e.Type {
@@ -254,16 +262,8 @@ func (d *Detector) procEventLoop() {
 			}
 
 			if e.Type == common.EventTypeExec {
-				filtered = false
-				filterMsg = ""
-				for _, f := range d.detailsFilters {
-					if f.fn(e.Pid, execDetails) {
-						d.filteredPIDs[e.Pid] = struct{}{}
-						filtered = true
-						filterMsg = f.msg
-					}
-				}
-				if filtered {
+				filter, filterMsg := d.shouldFilter(e.Pid, *execDetails)
+				if filter {
 					d.l.Warn("skipping process event due to details filter",
 						"pid", e.Pid,
 						"reason", filterMsg,
