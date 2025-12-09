@@ -352,7 +352,11 @@ func (p *Probe) GetContainerPID(pid int) (int, error) {
 }
 
 func (p *Probe) TrackPIDs(pids []int) error {
-	m := p.c.Maps[pidToContainerPIDMapName]
+	m, ok := p.c.Maps[pidToContainerPIDMapName]
+	if !ok {
+		return errors.New("eBPF maps are not loaded")
+	}
+
 	keys := make([]uint32, len(pids))
 	for i, pid := range pids {
 		keys[i] = uint32(pid)
