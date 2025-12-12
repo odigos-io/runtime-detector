@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"runtime"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/features"
@@ -56,8 +57,13 @@ const (
 	pidToContainerPIDMapName     = "user_pid_to_container_pid"
 	envPrefixMapName             = "env_prefix"
 
-	fileOpenProgramName         = "tracepoint__syscalls__sys_enter_openat"
-	openTrackingFilenameMapName = "files_open_to_track"
+	openSyscallProgramName        = "tracepoint__syscalls__sys_enter_open"
+	openSyscallExitProgramName    = "tracepoint__syscalls__sys_exit_open"
+	openatSyscallProgramName      = "tracepoint__syscalls__sys_enter_openat"
+	openatSyscallExitProgramName  = "tracepoint__syscalls__sys_exit_openat"
+	openat2SyscallProgramName     = "tracepoint__syscalls__sys_enter_openat2"
+	openat2SyscallExitProgramName = "tracepoint__syscalls__sys_exit_openat2"
+	openTrackingFilenameMapName   = "files_open_to_track"
 
 	execFilesToFilterMapName = "exec_files_to_filter"
 	detectorConfigMapName    = "detector_config"
@@ -164,7 +170,12 @@ func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Co
 
 	if len(p.openFilesToTrack) == 0 {
 		// if there are no files to track for open, avoid loading the openat program
-		delete(spec.Programs, fileOpenProgramName)
+		delete(spec.Programs, openSyscallProgramName)
+		delete(spec.Programs, openatSyscallProgramName)
+		delete(spec.Programs, openat2SyscallProgramName)
+		delete(spec.Programs, openSyscallExitProgramName)
+		delete(spec.Programs, openatSyscallExitProgramName)
+		delete(spec.Programs, openat2SyscallExitProgramName)
 	}
 
 	c, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{})
@@ -294,14 +305,59 @@ func (p *Probe) attach() error {
 	}
 
 	if len(p.openFilesToTrack) > 0 {
-		// attach to openat syscall
-		l, err = link.Tracepoint("syscalls", "sys_enter_openat", p.c.Programs[fileOpenProgramName], nil)
+		err = p.attachOpenPrograms()
 		if err != nil {
-			return fmt.Errorf("can't attach probe sys_enter_openat: %w", err)
+			return fmt.Errorf("failed to attach file open tracking programs: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (p *Probe) attachOpenPrograms() error {
+	var err error
+	var l link.Link
+
+	// attach to open syscall
+	// open() is not present on arm64
+	if runtime.GOARCH != "arm64" {
+		l, err = link.Tracepoint("syscalls", "sys_enter_open", p.c.Programs[openSyscallProgramName], nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sys_enter_open: %w", err)
+		}
+		p.links = append(p.links, l)
+		l, err = link.Tracepoint("syscalls", "sys_exit_open", p.c.Programs[openSyscallExitProgramName], nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sys_exit_open: %w", err)
 		}
 		p.links = append(p.links, l)
 	}
 
+	// attach to openat syscall
+	l, err = link.Tracepoint("syscalls", "sys_enter_openat", p.c.Programs[openatSyscallProgramName], nil)
+	if err != nil {
+		return fmt.Errorf("can't attach probe sys_enter_openat: %w", err)
+	}
+	p.links = append(p.links, l)
+	l, err = link.Tracepoint("syscalls", "sys_exit_openat", p.c.Programs[openatSyscallExitProgramName], nil)
+	if err != nil {
+		return fmt.Errorf("can't attach probe sys_exit_openat: %w", err)
+	}
+	p.links = append(p.links, l)
+
+	// attach to openat2 syscall which is optional here
+	// since linux v5.5 support openat2(2), commit fddb5d430ad9 ("open: introduce openat2(2) syscall")
+	l, err = link.Tracepoint("syscalls", "sys_enter_openat2", p.c.Programs[openat2SyscallProgramName], nil)
+	if err != nil {
+		p.logger.Debug("failed to attch openat2 tracepoint")
+		return nil
+	}
+	p.links = append(p.links, l)
+	l, err = link.Tracepoint("syscalls", "sys_exit_openat2", p.c.Programs[openat2SyscallExitProgramName], nil)
+	if err != nil {
+		p.logger.Debug("failed to attch openat2 tracepoint")
+	}
+	p.links = append(p.links, l)
 	return nil
 }
 
