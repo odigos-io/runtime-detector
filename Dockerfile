@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM keyval/odiglet-base:v1.8 AS builder
+FROM --platform=$BUILDPLATFORM keyval/odiglet-base:v1.10 AS builder
 
 WORKDIR /app
 

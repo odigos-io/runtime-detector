@@ -106,6 +106,13 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } tracked_pids_to_ns_pids SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, u32);   // the pid as return from bpf_get_current_pid_tgid()
+	__type(value, u8);  // dummy value, not used
+	__uint(max_entries, MAX_CONCURRENT_PIDS);
+} file_opens_by_pid SEC(".maps");
+
 // The following map is used to store the mapping between the PID in the configured namespace
 // (which the user is aware of) and the PID in the last level namespace (the container PID).
 // It can be read from user-space.
@@ -491,28 +498,9 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
 }
 #endif
 
-SEC("tracepoint/syscalls/sys_enter_openat")
-int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 tgid = (u32)(pid_tgid >> 32);
-
-    // the open can be called on a different thread than the main one,
-    // hence we use the tgid to find the main pid we are tracking
-    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
-    if (userspace_pid == NULL) {
-        return 0;
-    }
-
-    /*
-    The format of the tracepoint args is:
-        field:int dfd;	offset:16;	size:8;	signed:0;
-        field:const char * filename;	offset:24;	size:8;	signed:0;
-        field:int flags;	offset:32;	size:8;	signed:0;
-        field:umode_t mode;	offset:40;	size:8;	signed:0;
-    */
-
-    const char *filename = (const char *)(ctx->args[1]);
+static __always_inline int track_file_if_relevant(const char *filename, u32 pid) {
     open_filename_t opened_filename = {0};
+    u8 dummy_val = 0;
 
     long bytes_read = bpf_probe_read_user_str(&opened_filename.buf[0], sizeof(opened_filename.buf), filename);
     if (bytes_read <= 0) {
@@ -543,16 +531,122 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
         }
 
         if (compare_open_filenames(&opened_filename, configured_filename)) {
-            process_event_t event = {
-                .type = PROCESS_FILE_OPEN,
-                .pid = *userspace_pid,
-            };
-            bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+            bpf_map_update_elem(&file_opens_by_pid, &pid, &dummy_val, BPF_ANY);
             return 0;
         }
     }
 
     return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_open")
+int tracepoint__syscalls__sys_enter_open(struct syscall_trace_enter* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    u32 tgid = (u32)(pid_tgid >> 32);
+
+    // the open can be called on a different thread than the main one,
+    // hence we use the tgid to find the main pid we are tracking
+    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
+    if (userspace_pid == NULL) {
+        return 0;
+    }
+
+    // for oepn() the path is the first argument
+    const char *filename = (const char *)(ctx->args[0]);
+    return track_file_if_relevant(filename, pid);
+}
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    u32 tgid = (u32)(pid_tgid >> 32);
+
+    // the open can be called on a different thread than the main one,
+    // hence we use the tgid to find the main pid we are tracking
+    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
+    if (userspace_pid == NULL) {
+        return 0;
+    }
+
+    /*
+    The format of the tracepoint args is:
+        field:int dfd;	offset:16;	size:8;	signed:0;
+        field:const char * filename;	offset:24;	size:8;	signed:0;
+        field:int flags;	offset:32;	size:8;	signed:0;
+        field:umode_t mode;	offset:40;	size:8;	signed:0;
+    */
+
+    const char *filename = (const char *)(ctx->args[1]);
+    return track_file_if_relevant(filename, pid);
+}
+
+SEC("tracepoint/syscalls/sys_enter_openat2")
+int tracepoint__syscalls__sys_enter_openat2(struct syscall_trace_enter* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    u32 tgid = (u32)(pid_tgid >> 32);
+
+    // the open can be called on a different thread than the main one,
+    // hence we use the tgid to find the main pid we are tracking
+    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
+    if (userspace_pid == NULL) {
+        return 0;
+    }
+
+    // for openat2() the path is the second argument
+    const char *filename = (const char *)(ctx->args[1]);
+    return track_file_if_relevant(filename, pid);
+}
+
+static __always_inline int handle_open_exit(struct syscall_trace_exit* ctx) {
+	u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 tgid = (u32)(pid_tgid >> 32);
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+
+    u8 *found = bpf_map_lookup_elem(&file_opens_by_pid, &pid);
+	if (found == NULL) {
+        // no entry event for this open
+        return 0;
+    }
+
+    if (ctx->ret < 0) {
+        // no need to report failed open events
+        goto cleanup;
+    }
+
+    // the open can be called on a different thread than the main one,
+    // hence we use the tgid to find the main pid we are tracking
+    u32 *userspace_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &tgid);
+    if (userspace_pid == NULL) {
+        goto cleanup;
+    }
+	
+    process_event_t event = {
+        .type = PROCESS_FILE_OPEN,
+        .pid = *userspace_pid,
+    };
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+
+cleanup:
+	bpf_map_delete_elem(&file_opens_by_pid, &pid);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_open")
+int tracepoint__syscalls__sys_exit_open(struct syscall_trace_exit* ctx) {
+    return handle_open_exit(ctx);
+}
+
+SEC("tracepoint/syscalls/sys_exit_openat")
+int tracepoint__syscalls__sys_exit_openat(struct syscall_trace_exit* ctx) {
+    return handle_open_exit(ctx);
+}
+
+SEC("tracepoint/syscalls/sys_exit_openat2")
+int tracepoint__syscalls__sys_exit_openat2(struct syscall_trace_exit* ctx) {
+    return handle_open_exit(ctx);
 }
 
 SEC("tracepoint/sched/sched_process_exit")
