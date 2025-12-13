@@ -32,6 +32,8 @@ jobs:
               go-version: '${{ env.go_version }}'
           - name: make docker-generate
             run: make docker-generate
+          - name: make test/bin/file_open
+            run: make test/bin/file_open
           - name: verify output
             run: make check-clean-work-tree
           - name: Install vimto
@@ -42,3 +44,34 @@ jobs:
                 sudo chmod 0666 /dev/kvm
           - name: Test probe loading
             run: vimto -kernel :${{ matrix.tag }} -- go test -v ./...
+
+    compatibility-tests:
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: debian
+              arch: x64
+              runner: warp-ubuntu-latest-x64-2x-spot
+            - os: debian
+              arch: arm64
+              runner: warp-ubuntu-latest-arm64-2x-spot
+            - os: alpine
+              arch: x64
+              runner: warp-ubuntu-latest-x64-2x-spot
+            - os: alpine
+              arch: arm64
+              runner: warp-ubuntu-latest-arm64-2x-spot
+      name: Compatibility Tests - ${{ matrix.os }} (${{ matrix.arch }})
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+
+        - name: Set up Go
+          uses: actions/setup-go@v5
+          with:
+            go-version: '${{ env.go_version }}'
+
+        - name: Run tests
+          run: make docker-test-${{ matrix.os }}

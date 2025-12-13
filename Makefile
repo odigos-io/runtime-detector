@@ -3,8 +3,15 @@
 REPODIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 BPF_INCLUDE += -I${REPODIR}/internal/headers
+TESTS_BIN_DIR = test/bin
+FILE_OPEN_PROG_BIN = ${TESTS_BIN_DIR}/file_open
+BASE_IMAGE = keyval/odiglet-base:v1.10
 
 ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' ! -path './LICENSES/*' -exec dirname {} \; | sort)
+
+
+$(TESTS_BIN_DIR):
+	mkdir -p $(TESTS_BIN_DIR)
 
 .PHONY: go-mod-tidy
 go-mod-tidy: $(ALL_GO_MOD_DIRS:%=go-mod-tidy/%)
@@ -20,21 +27,52 @@ generate:
 
 .PHONY: docker-generate
 docker-generate:
-	docker run --rm -v $(shell pwd):/app keyval/odiglet-base:v1.9 /bin/sh -c "cd ../app && make generate"
+	docker run --rm -v $(shell pwd):/app $(BASE_IMAGE) /bin/sh -c "cd ../app && make generate"
 
-.PHONY: docker-test
+$(FILE_OPEN_PROG_BIN): test/c_processes/file_open.c | $(TESTS_BIN_DIR)
+	gcc -o $(FILE_OPEN_PROG_BIN) test/c_processes/file_open.c
+
+.PHONY: docker-test-debian docker-test-alpine
 docker-test:
 	docker run --rm \
 		--privileged \
 		--pid=host \
 		-v $(shell pwd):/app \
+		-w /app \
 		-v /sys/kernel/debug:/sys/kernel/debug \
 		-v /sys/kernel/tracing:/sys/kernel/tracing \
-		keyval/odiglet-base:v1.9 \
-		/bin/sh -c "cd ../app && make test"
+		$(BASE_IMAGE) \
+		/bin/sh -c "make test"
+
+docker-test-debian:
+	docker run --rm \
+		--privileged \
+		--pid=host \
+		-v $(shell pwd):/app \
+		-w /app \
+		-v /sys/kernel/debug:/sys/kernel/debug \
+		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		golang:1.25 bash -c '\
+			apt-get update && \
+			apt-get install -y gcc llvm clang && \
+			make test \
+		'
+
+docker-test-alpine:
+	docker run --rm \
+		--privileged \
+		--pid=host \
+		-v $(shell pwd):/app \
+		-w /app \
+		-v /sys/kernel/debug:/sys/kernel/debug \
+		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		golang:1.25-alpine sh -c '\
+			apk add --no-cache make gcc musl-dev llvm clang bash && \
+			make test \
+		'
 
 .PHONY: test
-test: generate
+test: generate $(FILE_OPEN_PROG_BIN)
 	go test -v ./...
 
 .PHONY: build
