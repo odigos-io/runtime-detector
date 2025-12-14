@@ -38,9 +38,9 @@ docker-test:
 		--privileged \
 		--pid=host \
 		-v $(shell pwd):/app \
-		-w /app \
 		-v /sys/kernel/debug:/sys/kernel/debug \
 		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		-w /app \
 		$(BASE_IMAGE) \
 		/bin/sh -c "make test"
 

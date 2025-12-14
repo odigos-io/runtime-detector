@@ -106,6 +106,8 @@ func TestDetector(t *testing.T) {
 	currentDir, err := os.Getwd()
 	require.NoError(t, err)
 
+	// require bash on the machine to simplify symlinks handling in the tests.
+	// on alpine multiple paths are pointing to the same busybox executable 
 	require.NotEmpty(t, bashLocation, "bash must be installed for the test")
 
 	testCases := []testCase{
