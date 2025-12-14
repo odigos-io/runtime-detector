@@ -45,7 +45,7 @@ jobs:
           - name: Test probe loading
             run: vimto -kernel :${{ matrix.tag }} -- go test -v ./...
 
-    compatibility-tests:
+    detector-compatibility-tests:
       strategy:
         fail-fast: false
         matrix:
@@ -62,8 +62,8 @@ jobs:
             - os: alpine
               arch: arm64
               runner: depot-ubuntu-24.04-arm
-      name: Compatibility Tests - ${{ matrix.os }} (${{ matrix.arch }})
-      runs-on: ubuntu-latest
+      name: Detector Compatibility Tests - ${{ matrix.os }} (${{ matrix.arch }})
+      runs-on: ${{ matrix.runner }}
       steps:
         - name: Checkout code
           uses: actions/checkout@v3

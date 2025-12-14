@@ -45,13 +45,12 @@ var (
 		return path
 	}()
 
-	// shellLocation finds the path of the shell (bash fallback to sh)
-	shellLocation = func() string {
+	// bashLocation finds the path of the bash executable
+	bashLocation = func() string {
 		path, err := exec.LookPath("bash")
-		if err == nil {
-			return path
+		if err != nil {
+			return ""
 		}
-		path, _ = exec.LookPath("sh")
 		return path
 	}()
 
@@ -106,6 +105,8 @@ func TestDetector(t *testing.T) {
 
 	currentDir, err := os.Getwd()
 	require.NoError(t, err)
+
+	require.NotEmpty(t, bashLocation, "bash must be installed for the test")
 
 	testCases := []testCase{
 		{
@@ -193,7 +194,7 @@ func TestDetector(t *testing.T) {
 		{
 			name:           "process executable is filtered",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
-			exePath:        shellLocation,
+			exePath:        bashLocation,
 			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
 			shouldDetect:   false,
 		},
@@ -222,7 +223,7 @@ func TestDetector(t *testing.T) {
 			}
 
 			opts := []DetectorOption{
-				WithExePathsToFilter(shellLocation),
+				WithExePathsToFilter(bashLocation),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
@@ -303,6 +304,7 @@ func TestDetector(t *testing.T) {
 			for i, event := range receivedEvents {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
+					// use the resolved path if one is relevant to check the actual expected executable is reported
 					expectedPath := tc.exePath
 					resolved, err := filepath.EvalSymlinks(expectedPath)
 					if err == nil {
@@ -397,7 +399,7 @@ func TestDetectorInitialScan(t *testing.T) {
 			// Now start the detector - this should trigger the initial scan
 			opts := []DetectorOption{
 				WithMinDuration(100 * time.Millisecond),
-				WithExePathsToFilter(shellLocation),
+				WithExePathsToFilter(bashLocation),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 			}
@@ -448,6 +450,7 @@ func TestDetectorInitialScan(t *testing.T) {
 			for i, event := range receivedEvents {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
+					// use the resolved path if one is relevant to check the actual expected executable is reported
 					expectedPath := tc.exePath
 					resolved, err := filepath.EvalSymlinks(expectedPath)
 					if err == nil {

@@ -30,7 +30,7 @@ docker-generate:
 	docker run --rm -v $(shell pwd):/app $(BASE_IMAGE) /bin/sh -c "cd ../app && make generate"
 
 $(FILE_OPEN_PROG_BIN): test/c_processes/file_open.c | $(TESTS_BIN_DIR)
-	gcc -o $(FILE_OPEN_PROG_BIN) test/c_processes/file_open.c
+	gcc test/c_processes/file_open.c -o $(FILE_OPEN_PROG_BIN)
 
 .PHONY: docker-test-debian docker-test-alpine
 docker-test:
@@ -49,27 +49,25 @@ docker-test-debian:
 		--privileged \
 		--pid=host \
 		-v $(shell pwd):/app \
-		-w /app \
 		-v /sys/kernel/debug:/sys/kernel/debug \
 		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		-w /app \
 		golang:1.25 bash -c '\
 			apt-get update && \
 			apt-get install -y gcc llvm clang && \
-			make test \
-		'
+			make test'
 
 docker-test-alpine:
 	docker run --rm \
 		--privileged \
 		--pid=host \
 		-v $(shell pwd):/app \
-		-w /app \
 		-v /sys/kernel/debug:/sys/kernel/debug \
 		-v /sys/kernel/tracing:/sys/kernel/tracing \
+		-w /app \
 		golang:1.25-alpine sh -c '\
 			apk add --no-cache make gcc musl-dev llvm clang bash && \
-			make test \
-		'
+			make test'
 
 .PHONY: test
 test: generate $(FILE_OPEN_PROG_BIN)

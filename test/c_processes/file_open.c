@@ -16,6 +16,7 @@ int main(int argc, char *argv[]) {
     char *file1Path = argv[1];
     char *file2Path = argv[2];
     
+    // using sleep for testing purposes to space out the events we look for
     sleep(1);
     
     file1 = fopen(file1Path, "r");
@@ -28,7 +29,7 @@ int main(int argc, char *argv[]) {
     fread(buf, 1, 4, file1);
     
     // Wait before opening second file
-    usleep(500000); // 500 milliseconds = 500000 microseconds
+    sleep(1);
     
     file2 = fopen(file2Path, "r");
     if (file2 == NULL) {
