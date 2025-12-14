@@ -84,8 +84,13 @@ type bpf_smallSpecs struct {
 type bpf_smallProgramSpecs struct {
 	TracepointSchedSchedProcessExit    *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysEnterOpen     *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_open"`
 	TracepointSyscallsSysEnterOpenat   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_openat"`
+	TracepointSyscallsSysEnterOpenat2  *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_openat2"`
 	TracepointSyscallsSysExitExecve    *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_execve"`
+	TracepointSyscallsSysExitOpen      *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_open"`
+	TracepointSyscallsSysExitOpenat    *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_openat"`
+	TracepointSyscallsSysExitOpenat2   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_exit_openat2"`
 	TracepointBtfSchedSchedProcessFork *ebpf.ProgramSpec `ebpf:"tracepoint_btf__sched__sched_process_fork"`
 }
 
@@ -97,6 +102,7 @@ type bpf_smallMapSpecs struct {
 	EnvPrefix             *ebpf.MapSpec `ebpf:"env_prefix"`
 	Events                *ebpf.MapSpec `ebpf:"events"`
 	ExecFilesToFilter     *ebpf.MapSpec `ebpf:"exec_files_to_filter"`
+	FileOpensByPid        *ebpf.MapSpec `ebpf:"file_opens_by_pid"`
 	FilesOpenToTrack      *ebpf.MapSpec `ebpf:"files_open_to_track"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
@@ -132,6 +138,7 @@ type bpf_smallMaps struct {
 	EnvPrefix             *ebpf.Map `ebpf:"env_prefix"`
 	Events                *ebpf.Map `ebpf:"events"`
 	ExecFilesToFilter     *ebpf.Map `ebpf:"exec_files_to_filter"`
+	FileOpensByPid        *ebpf.Map `ebpf:"file_opens_by_pid"`
 	FilesOpenToTrack      *ebpf.Map `ebpf:"files_open_to_track"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
@@ -143,6 +150,7 @@ func (m *bpf_smallMaps) Close() error {
 		m.EnvPrefix,
 		m.Events,
 		m.ExecFilesToFilter,
+		m.FileOpensByPid,
 		m.FilesOpenToTrack,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
@@ -161,8 +169,13 @@ type bpf_smallVariables struct {
 type bpf_smallPrograms struct {
 	TracepointSchedSchedProcessExit    *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
+	TracepointSyscallsSysEnterOpen     *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_open"`
 	TracepointSyscallsSysEnterOpenat   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_openat"`
+	TracepointSyscallsSysEnterOpenat2  *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_openat2"`
 	TracepointSyscallsSysExitExecve    *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_execve"`
+	TracepointSyscallsSysExitOpen      *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_open"`
+	TracepointSyscallsSysExitOpenat    *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_openat"`
+	TracepointSyscallsSysExitOpenat2   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_exit_openat2"`
 	TracepointBtfSchedSchedProcessFork *ebpf.Program `ebpf:"tracepoint_btf__sched__sched_process_fork"`
 }
 
@@ -170,8 +183,13 @@ func (p *bpf_smallPrograms) Close() error {
 	return _Bpf_smallClose(
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSyscallsSysEnterExecve,
+		p.TracepointSyscallsSysEnterOpen,
 		p.TracepointSyscallsSysEnterOpenat,
+		p.TracepointSyscallsSysEnterOpenat2,
 		p.TracepointSyscallsSysExitExecve,
+		p.TracepointSyscallsSysExitOpen,
+		p.TracepointSyscallsSysExitOpenat,
+		p.TracepointSyscallsSysExitOpenat2,
 		p.TracepointBtfSchedSchedProcessFork,
 	)
 }
