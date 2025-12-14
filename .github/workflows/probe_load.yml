@@ -12,7 +12,7 @@ env:
 jobs:
     vm-test:
         name: Run tests
-        runs-on: warp-ubuntu-2204-x64-8x-spot
+        runs-on: ubuntu-latest
         timeout-minutes: 15
         strategy:
           fail-fast: false
@@ -52,16 +52,16 @@ jobs:
           include:
             - os: debian
               arch: x64
-              runner: warp-ubuntu-latest-x64-2x-spot
+              runner: depot-ubuntu-24.04
             - os: debian
               arch: arm64
-              runner: warp-ubuntu-latest-arm64-2x-spot
+              runner: depot-ubuntu-24.04-arm
             - os: alpine
               arch: x64
-              runner: warp-ubuntu-latest-x64-2x-spot
+              runner: depot-ubuntu-24.04
             - os: alpine
               arch: arm64
-              runner: warp-ubuntu-latest-arm64-2x-spot
+              runner: depot-ubuntu-24.04-arm
       name: Compatibility Tests - ${{ matrix.os }} (${{ matrix.arch }})
       runs-on: ubuntu-latest
       steps:
