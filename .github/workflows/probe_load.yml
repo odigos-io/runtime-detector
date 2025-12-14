@@ -12,7 +12,7 @@ env:
 jobs:
     vm-test:
         name: Run tests
-        runs-on: warp-ubuntu-2204-x64-8x-spot
+        runs-on: ubuntu-latest
         timeout-minutes: 15
         strategy:
           fail-fast: false
@@ -29,9 +29,11 @@ jobs:
           - name: Set up Go
             uses: actions/setup-go@v5
             with:
-              go-version: '${{ env.go_version }}'
+              go-version: ${{ env.go_version }}
           - name: make docker-generate
             run: make docker-generate
+          - name: make test/bin/file_open
+            run: make test/bin/file_open
           - name: verify output
             run: make check-clean-work-tree
           - name: Install vimto
@@ -42,3 +44,34 @@ jobs:
                 sudo chmod 0666 /dev/kvm
           - name: Test probe loading
             run: vimto -kernel :${{ matrix.tag }} -- go test -v ./...
+
+    detector-compatibility-tests:
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: debian
+              arch: x64
+              runner: depot-ubuntu-24.04
+            - os: debian
+              arch: arm64
+              runner: depot-ubuntu-24.04-arm
+            - os: alpine
+              arch: x64
+              runner: depot-ubuntu-24.04
+            - os: alpine
+              arch: arm64
+              runner: depot-ubuntu-24.04-arm
+      name: Detector Compatibility Tests - ${{ matrix.os }} (${{ matrix.arch }})
+      runs-on: ${{ matrix.runner }}
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+
+        - name: Set up Go
+          uses: actions/setup-go@v5
+          with:
+            go-version: ${{ env.go_version }}
+
+        - name: Run tests
+          run: make docker-test-${{ matrix.os }}

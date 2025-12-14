@@ -15,9 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bigEnvVarsMapWithUserVal is a map with a lot of environment variables to test the detector's handling of a process
-// with many environment variables.
 var (
+	// bigEnvVarsMapWithUserVal is a map with a lot of environment variables to test the detector's handling of a process
+	// with many environment variables.
 	bigEnvVarsMapWithUserVal = func() map[string]string {
 		m := make(map[string]string)
 		for i := 0; i < 2000; i++ {
@@ -34,6 +34,24 @@ var (
 			m[fmt.Sprintf("TEST_ENV_VAR_%d", i)] = fmt.Sprintf("value%d", i)
 		}
 		return m
+	}()
+
+	// sleepLocation finds and resolves the sleep binary path
+	sleepLocation = func() string {
+		path, err := exec.LookPath("sleep")
+		if err != nil {
+			return ""
+		}
+		return path
+	}()
+
+	// bashLocation finds the path of the bash executable
+	bashLocation = func() string {
+		path, err := exec.LookPath("bash")
+		if err != nil {
+			return ""
+		}
+		return path
 	}()
 
 	defaultMinDurationFilter = 100 * time.Millisecond
@@ -85,11 +103,18 @@ func TestDetector(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(testFile2)
 
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	// require bash on the machine to simplify symlinks handling in the tests.
+	// on alpine multiple paths are pointing to the same busybox executable 
+	require.NotEmpty(t, bashLocation, "bash must be installed for the test")
+
 	testCases := []testCase{
 		{
 			name:           "basic process",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"1"},
 			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
@@ -98,9 +123,22 @@ func TestDetector(t *testing.T) {
 			},
 		},
 		{
-			name:           "multiple file opens",
+			name:           "multiple file opens by Go program",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
 			exePath:        filepath.Join(testDir, "file_open"),
+			args:           []string{testFile, testFile2},
+			shouldDetect:   true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessFileOpenEvent,
+				ProcessFileOpenEvent,
+				ProcessExitEvent,
+			},
+		},
+		{
+			name:           "multiple file opens by C program",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			exePath:        filepath.Join(currentDir, "test/bin/file_open"),
 			args:           []string{testFile, testFile2},
 			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
@@ -114,7 +152,7 @@ func TestDetector(t *testing.T) {
 			name:            "process with a lot of environment variables and user env var",
 			envVarsForExec:  bigEnvVarsMapWithUserVal,
 			envVarsToAssert: map[string]string{"USER_ENV": "value"},
-			exePath:         "/usr/bin/sleep",
+			exePath:         sleepLocation,
 			args:            []string{"1"},
 			shouldDetect:    true,
 			expectedEvents: []ProcessEventType{
@@ -125,7 +163,7 @@ func TestDetector(t *testing.T) {
 		{
 			name:           "process with a lot of environment variables without user env var",
 			envVarsForExec: bigEnvVarsMapWithoutUserVal,
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"1"},
 			shouldDetect:   false, // Should be filtered out by environment variable filter
 		},
@@ -151,14 +189,14 @@ func TestDetector(t *testing.T) {
 		{
 			name:           "filtered process by env prefix",
 			envVarsForExec: map[string]string{},
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"1"},
 			shouldDetect:   false, // should be filtered out in eBPF based on env prefix
 		},
 		{
 			name:           "process executable is filtered",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
-			exePath:        "/usr/bin/bash",
+			exePath:        bashLocation,
 			args:           []string{"-c", "start=$SECONDS; while (( SECONDS - start < 1 )); do :; done"},
 			shouldDetect:   false,
 		},
@@ -187,7 +225,7 @@ func TestDetector(t *testing.T) {
 			}
 
 			opts := []DetectorOption{
-				WithExePathsToFilter("/usr/bin/bash"),
+				WithExePathsToFilter(bashLocation),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 				WithFilesOpenTrigger(testFile, testFile2),
@@ -268,7 +306,13 @@ func TestDetector(t *testing.T) {
 			for i, event := range receivedEvents {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
-					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+					// use the resolved path if one is relevant to check the actual expected executable is reported
+					expectedPath := tc.exePath
+					resolved, err := filepath.EvalSymlinks(expectedPath)
+					if err == nil {
+						expectedPath = resolved
+					}
+					assert.Equal(t, expectedPath, event.ExecDetails.ExePath, "unexpected executable path")
 
 					var envVarsToAssert map[string]string
 					if len(tc.envVarsToAssert) > 0 {
@@ -293,7 +337,7 @@ func TestDetectorInitialScan(t *testing.T) {
 		{
 			name:           "initial scan - basic process with user env",
 			envVarsForExec: map[string]string{"USER_ENV": "value"},
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"10"}, // Long sleep to keep process alive, we'll kill it before it exits
 			shouldDetect:   true,
 			expectedEvents: []ProcessEventType{
@@ -305,7 +349,7 @@ func TestDetectorInitialScan(t *testing.T) {
 			name:            "initial scan - process with many env vars and user env",
 			envVarsForExec:  bigEnvVarsMapWithUserVal,
 			envVarsToAssert: map[string]string{"USER_ENV": "value"},
-			exePath:         "/usr/bin/sleep",
+			exePath:         sleepLocation,
 			args:            []string{"10"},
 			shouldDetect:    true,
 			expectedEvents: []ProcessEventType{
@@ -316,14 +360,14 @@ func TestDetectorInitialScan(t *testing.T) {
 		{
 			name:           "initial scan - process with many env vars without user env",
 			envVarsForExec: bigEnvVarsMapWithoutUserVal,
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"10"},
 			shouldDetect:   false, // Should be filtered out by environment variable filter
 		},
 		{
 			name:           "initial scan - process without any env vars",
 			envVarsForExec: map[string]string{},
-			exePath:        "/usr/bin/sleep",
+			exePath:        sleepLocation,
 			args:           []string{"10"},
 			shouldDetect:   false, // Should be filtered out by env prefix filter
 		},
@@ -357,7 +401,7 @@ func TestDetectorInitialScan(t *testing.T) {
 			// Now start the detector - this should trigger the initial scan
 			opts := []DetectorOption{
 				WithMinDuration(100 * time.Millisecond),
-				WithExePathsToFilter("/usr/bin/bash"),
+				WithExePathsToFilter(bashLocation),
 				WithEnvironments("USER_ENV"),
 				WithEnvPrefixFilter("USER_E"),
 			}
@@ -408,7 +452,13 @@ func TestDetectorInitialScan(t *testing.T) {
 			for i, event := range receivedEvents {
 				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
 				if event.ExecDetails != nil {
-					assert.Equal(t, tc.exePath, event.ExecDetails.ExePath, "unexpected executable path")
+					// use the resolved path if one is relevant to check the actual expected executable is reported
+					expectedPath := tc.exePath
+					resolved, err := filepath.EvalSymlinks(expectedPath)
+					if err == nil {
+						expectedPath = resolved
+					}
+					assert.Equal(t, expectedPath, event.ExecDetails.ExePath, "unexpected executable path")
 
 					var envVarsToAssert map[string]string
 					if len(tc.envVarsToAssert) > 0 {
