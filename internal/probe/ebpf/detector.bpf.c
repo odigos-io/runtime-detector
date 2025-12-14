@@ -108,7 +108,7 @@ struct {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u32);   // the pid as return from bpf_get_current_pid_tgid()
+	__type(key, u32);   // the pid as returned from bpf_get_current_pid_tgid()
 	__type(value, u8);  // dummy value, not used
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } file_opens_by_pid SEC(".maps");
@@ -541,6 +541,10 @@ static __always_inline int track_file_if_relevant(const char *filename, u32 pid)
 
 SEC("tracepoint/syscalls/sys_enter_open")
 int tracepoint__syscalls__sys_enter_open(struct syscall_trace_enter* ctx) {
+    // from the kernel perspective: pid is the user thread id
+    // tgid is thread group id which is process id from the user perspective.
+    // for tracking user processes we're using tgid - for tracking entry-exit events from
+    // system calls we are using pid.
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     u32 tgid = (u32)(pid_tgid >> 32);
@@ -571,6 +575,7 @@ int tracepoint__syscalls__sys_enter_openat(struct syscall_trace_enter* ctx) {
     }
 
     /*
+    From /sys/kernel/tracing/events/syscalls/sys_enter_openat/format
     The format of the tracepoint args is:
         field:int dfd;	offset:16;	size:8;	signed:0;
         field:const char * filename;	offset:24;	size:8;	signed:0;
@@ -606,7 +611,7 @@ static __always_inline int handle_open_exit(struct syscall_trace_exit* ctx) {
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
 
     u8 *found = bpf_map_lookup_elem(&file_opens_by_pid, &pid);
-	if (found == NULL) {
+    if (found == NULL) {
         // no entry event for this open
         return 0;
     }
@@ -630,8 +635,8 @@ static __always_inline int handle_open_exit(struct syscall_trace_exit* ctx) {
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
 
 cleanup:
-	bpf_map_delete_elem(&file_opens_by_pid, &pid);
-	return 0;
+    bpf_map_delete_elem(&file_opens_by_pid, &pid);
+    return 0;
 }
 
 SEC("tracepoint/syscalls/sys_exit_open")
