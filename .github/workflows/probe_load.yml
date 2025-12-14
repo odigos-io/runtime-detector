@@ -29,7 +29,7 @@ jobs:
           - name: Set up Go
             uses: actions/setup-go@v5
             with:
-              go-version: '${{ env.go_version }}'
+              go-version: ${{ env.go_version }}
           - name: make docker-generate
             run: make docker-generate
           - name: make test/bin/file_open
@@ -71,7 +71,7 @@ jobs:
         - name: Set up Go
           uses: actions/setup-go@v5
           with:
-            go-version: '${{ env.go_version }}'
+            go-version: ${{ env.go_version }}
 
         - name: Run tests
           run: make docker-test-${{ matrix.os }}
