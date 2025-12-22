@@ -15,6 +15,7 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
+
 	"github.com/odigos-io/runtime-detector/internal/common"
 	"github.com/odigos-io/runtime-detector/internal/proc"
 )
@@ -182,7 +183,7 @@ func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Co
 	if err != nil {
 		var ve *ebpf.VerifierError
 		if errors.As(err, &ve) {
-			fmt.Printf("Verifier log: %-100v\n", ve)
+			return nil, fmt.Errorf("verifier error %w", ve)
 		}
 		return nil, err
 	}

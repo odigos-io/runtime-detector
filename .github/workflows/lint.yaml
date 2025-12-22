@@ -1,0 +1,28 @@
+name: lint
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  go_version: '~1.25'
+  CGO_ENABLED: '0'
+
+jobs:
+  go-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '${{ env.go_version }}'
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y clang llvm
+    - name: Run linters
+      run: make golangci-lint
+    - name: verify output
+      run: make check-clean-work-tree

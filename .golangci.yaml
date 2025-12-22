@@ -1,0 +1,93 @@
+# See https://github.com/golangci/golangci-lint#config-file
+version: "2"
+run:
+  issues-exit-code: 1
+  tests: true
+linters:
+  default: none
+  enable:
+    - asasalint
+    - bodyclose
+    - depguard
+    - errcheck
+    - errorlint
+    - govet
+    - ineffassign
+    - misspell
+    - perfsprint
+    - staticcheck
+    - testifylint
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - gocritic
+    - forbidigo
+    - sloglint
+    - staticcheck
+  settings:
+    depguard:
+      rules:
+        crypto:
+          deny:
+            - pkg: crypto/md5
+            - pkg: crypto/sha1
+            - pkg: crypto/**/pkix
+        ioutil:
+          deny:
+            - pkg: io/ioutil
+        non-tests:
+          files:
+            - "!$test"
+            - "!**/*test/*.go"
+            - "!**/testutils/*.go"
+          deny:
+            - pkg: testing
+            - pkg: github.com/stretchr/testify
+    misspell:
+      locale: US
+      ignore-rules:
+        - cancelled
+    perfsprint:
+      int-conversion: true
+      err-error: true
+      errorf: true
+      sprintf1: true
+      strconcat: true
+    testifylint:
+      enable-all: true
+      disable:
+        - float-compare
+        - go-require
+        - require-error
+    errcheck:
+      check-type-assertions: true
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+          - errcheck
+        path: _test\.go
+      - linters:
+          - forbidigo
+          - gocritic
+        path: test/
+
+issues:
+  # Setting to unlimited so the linter only is run once to debug all issues.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/odigos-io/runtime-detector
