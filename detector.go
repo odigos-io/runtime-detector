@@ -113,13 +113,11 @@ type detectorConfig struct {
 	procFSPath       string
 }
 
-var (
-	// defaultExcludedExePaths are the executables that we do not want to track
-	defaultExcludedExePaths = []string{
-		// it is common for the kubelet/container-runtime to run a process with the command "/pause",
-		"/pause",
-	}
-)
+// defaultExcludedExePaths are the executables that we do not want to track
+var defaultExcludedExePaths = []string{
+	// it is common for the kubelet/container-runtime to run a process with the command "/pause",
+	"/pause",
+}
 
 // DetectorOption applies a configuration option to [Detector].
 type DetectorOption interface {
@@ -237,7 +235,7 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 	}, nil
 }
 
-// filter checks if the events assocaited with pid and details should be filtered
+// filter checks if the events associated with pid and details should be filtered
 // if it should, true and a message specifying the filtering reason will be returned
 // If it shouldn't, false and an empty string will be returned
 func (d *Detector) shouldFilter(pid int, details ProcessExecDetails) (bool, string) {
@@ -486,7 +484,7 @@ func WithFilesOpenTrigger(files ...string) DetectorOption {
 func WithProcFSPath(path string) DetectorOption {
 	return fnOpt(func(c detectorConfig) (detectorConfig, error) {
 		if path == "" {
-			return c, fmt.Errorf("procFSPath cannot be empty")
+			return c, errors.New("procFSPath cannot be empty")
 		}
 		c.procFSPath = path
 		return c, nil

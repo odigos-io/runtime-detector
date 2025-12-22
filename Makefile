@@ -7,7 +7,20 @@ TESTS_BIN_DIR = test/bin
 FILE_OPEN_PROG_BIN = ${TESTS_BIN_DIR}/file_open
 BASE_IMAGE = keyval/odiglet-base:v1.10
 
-ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' ! -path './LICENSES/*' -exec dirname {} \; | sort)
+GOLANGCI_LINT_VERSION := v2.7.2
+GOLANGCI_LINT_PACKAGE := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+ALL_GO_MOD_DIRS := $(shell find . -type f -name 'go.mod' -exec dirname {} \; | sort)
+
+.PHONY: golangci-lint golangci-lint-fix
+golangci-lint-fix: ARGS=--fix
+golangci-lint-fix: golangci-lint
+golangci-lint: go-mod-tidy generate $(ALL_GO_MOD_DIRS:%=golangci-lint/%)
+golangci-lint/%: DIR=$*
+golangci-lint/%:
+	@echo 'golangci-lint $(if $(ARGS),$(ARGS) ,)$(DIR)' \
+		&& cd $(DIR) \
+		&& go run $(GOLANGCI_LINT_PACKAGE) run --allow-serial-runners --timeout=2m0s $(ARGS)
 
 
 $(TESTS_BIN_DIR):

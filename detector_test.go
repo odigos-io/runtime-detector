@@ -88,18 +88,16 @@ type testCase struct {
 }
 
 func TestDetector(t *testing.T) {
-	testDir, err := os.MkdirTemp("", "detector-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(testDir)
+	testDir := t.TempDir()
 
 	// Create a test file that will be opened by processes
 	testFile := filepath.Join(testDir, "test.txt")
-	err = os.WriteFile(testFile, []byte("test"), 0644)
+	err := os.WriteFile(testFile, []byte("test"), 0o644)
 	require.NoError(t, err)
 
 	// Create a second test file for the multi-file test
 	testFile2 := filepath.Join(testDir, "test2.txt")
-	err = os.WriteFile(testFile2, []byte("test2"), 0644)
+	err = os.WriteFile(testFile2, []byte("test2"), 0o644)
 	require.NoError(t, err)
 	defer os.Remove(testFile2)
 
@@ -107,7 +105,7 @@ func TestDetector(t *testing.T) {
 	require.NoError(t, err)
 
 	// require bash on the machine to simplify symlinks handling in the tests.
-	// on alpine multiple paths are pointing to the same busybox executable 
+	// on alpine multiple paths are pointing to the same busybox executable
 	require.NotEmpty(t, bashLocation, "bash must be installed for the test")
 
 	testCases := []testCase{
@@ -298,13 +296,13 @@ func TestDetector(t *testing.T) {
 			}
 
 			// Verify we received the expected events
-			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+			if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
 				t.Logf("received events: %v\n", receivedEvents)
 				return
 			}
 
 			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
+				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), "unexpected event type for the event %d", i)
 				if event.ExecDetails != nil {
 					// use the resolved path if one is relevant to check the actual expected executable is reported
 					expectedPath := tc.exePath
@@ -444,13 +442,13 @@ func TestDetectorInitialScan(t *testing.T) {
 			}
 
 			// Verify we received the expected events
-			if !assert.Equal(t, len(tc.expectedEvents), len(receivedEvents), "unexpected number of events") {
+			if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
 				t.Logf("received events: %v\n", receivedEvents)
 				return
 			}
 
 			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), fmt.Sprintf("unexpected event type for the event %d", i))
+				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), "unexpected event type for the event %d", i)
 				if event.ExecDetails != nil {
 					// use the resolved path if one is relevant to check the actual expected executable is reported
 					expectedPath := tc.exePath
