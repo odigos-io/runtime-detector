@@ -253,13 +253,6 @@ func TestFailedExecCleanup(t *testing.T) {
 // TestNonLeaderThreadExecLeak verifies that when a non-leader thread calls
 // execve, the map entry keyed on the old thread-id is cleaned up after the
 // process exits.
-//
-// Kernel behavior: when a non-leader thread (tid != tgid) calls execve and
-// it succeeds, the kernel changes the thread's pid to the tgid.
-// sys_enter_execve fires BEFORE the change (key = old tid), but
-// sys_exit_execve fires AFTER (key = tgid). The lookup in sys_exit_execve
-// uses the new pid and won't find the old entry. sched_process_exit only
-// cleans up the tgid key, so the old tid entry leaks permanently.
 func TestNonLeaderThreadExecLeak(t *testing.T) {
 	pythonPath, err := exec.LookPath("python3")
 	if err != nil {

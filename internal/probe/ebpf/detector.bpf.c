@@ -371,6 +371,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 
     pid_tgid = bpf_get_current_pid_tgid();
     tgid = (u32)(pid_tgid >> 32);
+    pid = (u32)(pid_tgid & 0xFFFFFFFF);
 
     // If any of the threads in a thread group performs an
     // execve, then all threads other than the thread group
@@ -380,6 +381,15 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     // https://man7.org/linux/man-pages/man2/clone.2.html
     u8 dummy_val = 0;
     bpf_map_update_elem(&ongoing_exec_tgids, &tgid, &dummy_val, BPF_ANY);
+#ifdef NO_BTF
+    // if we don't have BTF, threads might have been added to these maps in the fork probe.
+    // if this exec if for a non-leader thread, we might have added the old tid as a key in the maps.
+    // but after execve the pid of this thread will change to the tgid, and we won't be able to find the old tid key in the exit probe to clean it up.
+    if (pid != tgid) {
+        bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
+        bpf_map_delete_elem(&user_pid_to_container_pid, &pid);
+    }
+#endif
     return 0;
 }
 
