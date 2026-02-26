@@ -250,6 +250,66 @@ func TestFailedExecCleanup(t *testing.T) {
 	assertMapsAreEmpty(t, p)
 }
 
+// TestNonLeaderThreadExecLeak verifies that when a non-leader thread calls
+// execve, the map entry keyed on the old thread-id is cleaned up after the
+// process exits.
+//
+// Kernel behavior: when a non-leader thread (tid != tgid) calls execve and
+// it succeeds, the kernel changes the thread's pid to the tgid.
+// sys_enter_execve fires BEFORE the change (key = old tid), but
+// sys_exit_execve fires AFTER (key = tgid). The lookup in sys_exit_execve
+// uses the new pid and won't find the old entry. sched_process_exit only
+// cleans up the tgid key, so the old tid entry leaks permanently.
+func TestNonLeaderThreadExecLeak(t *testing.T) {
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not found in PATH, skipping")
+	}
+
+	execTarget, err := exec.LookPath("true")
+	require.NoError(t, err)
+
+	p := &Probe{
+		logger:          slog.Default(),
+		envPrefixFilter: "DETECTOR_TEST_",
+		execFilesToFilter: map[string]struct{}{
+			pythonPath: {},
+		},
+	}
+	err = p.load(0)
+	require.NoError(t, err)
+	defer p.Close()
+	err = p.attach()
+	require.NoError(t, err)
+
+	// Python is filtered (execFilesToFilter) so its initial exec is not tracked.
+	// Inside Python a non-leader thread calls os.execve on the target binary
+	// ("true") with the matching env prefix — this IS tracked.
+	// After exec succeeds the process (now "true") exits immediately.
+	cmd := exec.Command(pythonPath, "-c", `
+import threading, os, sys, time
+def do_exec():
+    time.sleep(0.1)
+    os.execve(sys.argv[1], [sys.argv[1]], os.environ)
+t = threading.Thread(target=do_exec)
+t.start()
+t.join()
+`, execTarget)
+	cmd.Env = []string{"DETECTOR_TEST_VAR=1"}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	err = cmd.Start()
+	require.NoError(t, err)
+
+	err = cmd.Wait()
+	require.NoError(t, err)
+
+	// Both maps should be empty: the process has exited.
+	// BUG: the entry added in sys_enter_execve under the old thread-id is
+	// never cleaned — sys_exit_execve and sched_process_exit only know
+	// about the new pid (tgid).
+	assertMapsAreEmpty(t, p)
+}
+
 func assertMapsAreEmpty(t *testing.T, p *Probe) {
 	t.Helper()
 	for _, mapName := range []string{pidToContainerPIDMapName, trackedPidsMapName} {
@@ -261,6 +321,7 @@ func assertMapsAreEmpty(t *testing.T, p *Probe) {
 		var key, value uint32
 		count := 0
 		for iterator.Next(&key, &value) {
+			t.Log("found entry", "key", key, "value", value)
 			count++
 		}
 		assert.Equal(t, 0, count, "map %s is not empty, have %d entries", mapName, count)

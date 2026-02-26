@@ -106,6 +106,16 @@ struct {
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } tracked_pids_to_ns_pids SEC(".maps");
 
+// used to correlate entry and exit of execve syscall,
+// contains the tgid of processes that were classified as relevant in the execve entry probe,
+// but have not yet reached the execve exit probe.
+struct {
+	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+	__type(key, u32);   // the tgid as return from bpf_get_current_pid_tgid() in execve entry
+	__type(value, u8);  // value is not used
+	__uint(max_entries, MAX_CONCURRENT_PIDS);
+} ongoing_exec_tgids SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u32);   // the pid as returned from bpf_get_current_pid_tgid()
@@ -291,7 +301,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     */
     u64 pid_tgid = 0;
     u32 pid = 0;
-    pids_in_ns_t pids = {0};
+    u32 tgid = 0;
     struct task_struct *task = NULL;
     const char **envp = (const char **)(ctx->args[2]);
     const char *argp;
@@ -360,7 +370,37 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
 #endif
 
     pid_tgid = bpf_get_current_pid_tgid();
-    pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    tgid = (u32)(pid_tgid >> 32);
+
+    // If any of the threads in a thread group performs an
+    // execve, then all threads other than the thread group
+    // leader are terminated, and the new program is executed in
+    // the thread group leader.
+    // this is why we are tracking by tgid here.
+    // https://man7.org/linux/man-pages/man2/clone.2.html
+    u8 dummy_val = 0;
+    bpf_map_update_elem(&ongoing_exec_tgids, &tgid, &dummy_val, BPF_ANY);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_execve")
+int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
+    u32 tgid = (u32)(pid_tgid >> 32);
+    pids_in_ns_t pids = {0};
+    long ret = 0;
+    struct task_struct *task = NULL;
+
+    if (ctx->ret < 0) {
+        // exec failed
+        goto cleanup;
+    }
+
+    u8 *exist = bpf_map_lookup_elem(&ongoing_exec_tgids, &tgid);
+    if (exist == NULL) {
+        return 0;
+    }
 
 #ifdef NO_BTF
     pids.configured_ns_pid = pid;
@@ -369,46 +409,29 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     task = (struct task_struct *)bpf_get_current_task();
     ret = get_pid_for_configured_ns(task, &pids, pid);
     if (ret < 0) {
-        return 0;
+        goto cleanup;
     }
 #endif
 
     ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
     if (ret != 0) {
-        return 0;
+        goto cleanup;
     }
 
     ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
     if (ret != 0) {
-        return 0;
-    }
-
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_exit_execve")
-int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
-    u64 pid_tgid = bpf_get_current_pid_tgid();
-    u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
-
-    if (ctx->ret < 0) {
-        // execve failed, cleanup
-        bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
-        bpf_map_delete_elem(&user_pid_to_container_pid, &pid);
-        return 0;
-    }
-
-    u32 *user_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
-    if (user_pid == NULL) {
-        return 0;
+        goto cleanup;
     }
 
     process_event_t event = {
         .type = PROCESS_EXEC,
-        .pid = *user_pid,
+        .pid = pids.configured_ns_pid,
     };
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+
+cleanup:
+    bpf_map_delete_elem(&ongoing_exec_tgids, &tgid);
     return 0;
 }
 
