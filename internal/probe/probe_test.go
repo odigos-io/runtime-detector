@@ -2,7 +2,11 @@ package probe
 
 import (
 	"log/slog"
+	"os"
+	"os/exec"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -196,4 +200,70 @@ func TestLoad(t *testing.T) {
 
 		assert.Equal(t, p.execFilesToFilter, collectedExeFiles)
 	})
+}
+
+// TestFailedExecCleanup verifies that a failed execve does not leave stale
+// entries in the BPF tracking maps.
+func TestFailedExecCleanup(t *testing.T) {
+	p := &Probe{
+		logger:          slog.Default(),
+		envPrefixFilter: "DETECTOR_TEST_",
+		execFilesToFilter: map[string]struct{}{
+			"/bin/bash":     {},
+			"/bin/sh":       {},
+			"/usr/bin/bash": {},
+			"/usr/bin/sh":   {},
+		},
+	}
+	// pid_ns_inode = 0 → report PIDs as seen by the host namespace
+	err := p.load(0)
+	require.NoError(t, err)
+	defer p.Close()
+	err = p.attach()
+	require.NoError(t, err)
+
+	// Pipe for stdin so bash's "read" builtin blocks indefinitely.
+	pr, pw, err := os.Pipe()
+	require.NoError(t, err)
+	defer pw.Close()
+	defer pr.Close()
+
+	// bash is exec'd with an empty env → initial exec does NOT match the prefix.
+	// bash then exports the matching var and calls "exec /nonexistent..." which
+	// fails (ENOENT). "shopt -s execfail" keeps bash alive after the failure.
+	cmd := exec.Command("bash", "-c",
+		`shopt -s execfail; export DETECTOR_TEST_VAR=1; exec /nonexistent/binary_that_does_not_exist 2>/dev/null; read`)
+	cmd.Stdin = pr
+	cmd.Env = []string{}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	err = cmd.Start()
+	require.NoError(t, err)
+	defer func() {
+		// Kill the entire process group to clean up bash.
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		cmd.Wait()
+	}()
+
+	// Give the BPF programs time to process the failed exec.
+	time.Sleep(time.Second)
+
+	assertMapsAreEmpty(t, p)
+}
+
+func assertMapsAreEmpty(t *testing.T, p *Probe) {
+	t.Helper()
+	for _, mapName := range []string{pidToContainerPIDMapName, trackedPidsMapName} {
+		m, ok := p.c.Maps[mapName]
+		assert.True(t, ok)
+		assert.NotNil(t, m)
+
+		iterator := m.Iterate()
+		var key, value uint32
+		count := 0
+		for iterator.Next(&key, &value) {
+			count++
+		}
+		assert.Equal(t, 0, count, "map %s is not empty, have %d entries", mapName, count)
+		assert.NoError(t, iterator.Err())
+	}
 }

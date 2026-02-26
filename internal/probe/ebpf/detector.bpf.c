@@ -391,6 +391,13 @@ int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
 
+    if (ctx->ret < 0) {
+        // execve failed, cleanup
+        bpf_map_delete_elem(&tracked_pids_to_ns_pids, &pid);
+        bpf_map_delete_elem(&user_pid_to_container_pid, &pid);
+        return 0;
+    }
+
     u32 *user_pid = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &pid);
     if (user_pid == NULL) {
         return 0;
