@@ -83,6 +83,8 @@ type testCase struct {
 	shouldDetect      bool
 	expectedEvents    []ProcessEventType
 	minDurationFilter *time.Duration
+	// whether to assert the events arrived in the order defined in expectedEvents.
+	eventsNotInOrder bool
 
 	skipTest func(t *testing.T) bool
 }
@@ -211,6 +213,7 @@ func TestDetector(t *testing.T) {
 			exePath:           filepath.Join(currentDir, "test/bin/thread_exec"),
 			args:              []string{},
 			shouldDetect:      true,
+			eventsNotInOrder:  true,
 			minDurationFilter: &zeroDurationFilter,
 			expectedEvents: []ProcessEventType{
 				ProcessExecEvent,
@@ -309,38 +312,73 @@ func TestDetector(t *testing.T) {
 				return
 			}
 
-			// Verify we received the expected events
-			if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
-				t.Logf("received events: %v\n", receivedEvents)
-				return
-			}
-
-			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), "unexpected event type for the event %d", i)
-				if event.ExecDetails != nil {
-					// use the resolved path if one is relevant to check the actual expected executable is reported
-					expectedPath := tc.exePath
-					resolved, err := filepath.EvalSymlinks(expectedPath)
-					if err == nil {
-						expectedPath = resolved
-					}
-					assert.Equal(t, expectedPath, event.ExecDetails.ExePath, "unexpected executable path")
-
-					var envVarsToAssert map[string]string
-					if len(tc.envVarsToAssert) > 0 {
-						envVarsToAssert = tc.envVarsToAssert
-					} else {
-						envVarsToAssert = tc.envVarsForExec
-					}
-
-					if len(envVarsToAssert) > 0 {
-						for k, v := range envVarsToAssert {
-							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
-						}
-					}
-				}
+			if tc.eventsNotInOrder {
+				assertEventsNotInOrder(t, receivedEvents, tc)
+			} else {
+				assertEventsInOrder(t, receivedEvents, tc)
 			}
 		})
+	}
+}
+
+func assertEventsNotInOrder(t *testing.T, receivedEvents []ProcessEvent, tc testCase) {
+	// Verify we received the expected events
+	if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
+		t.Logf("received events: %v\n", receivedEvents)
+		return
+	}
+
+	expectedEventTypes := make(map[ProcessEventType]int)
+	for _, eventType := range tc.expectedEvents {
+		expectedEventTypes[eventType]++
+	}
+
+	for _, event := range receivedEvents {
+		count, exists := expectedEventTypes[event.EventType]
+		if !exists || count == 0 {
+			assert.Failf(t, "unexpected event type: %s", event.EventType.String())
+			continue
+		}
+		expectedEventTypes[event.EventType]--
+		assertExecDetails(t, event, tc)
+	}
+}
+
+func assertExecDetails(t *testing.T, event ProcessEvent, tc testCase) {
+	if event.ExecDetails != nil {
+		// use the resolved path if one is relevant to check the actual expected executable is reported
+		expectedPath := tc.exePath
+		resolved, err := filepath.EvalSymlinks(expectedPath)
+		if err == nil {
+			expectedPath = resolved
+		}
+		assert.Equal(t, expectedPath, event.ExecDetails.ExePath, "unexpected executable path")
+
+		var envVarsToAssert map[string]string
+		if len(tc.envVarsToAssert) > 0 {
+			envVarsToAssert = tc.envVarsToAssert
+		} else {
+			envVarsToAssert = tc.envVarsForExec
+		}
+
+		if len(envVarsToAssert) > 0 {
+			for k, v := range envVarsToAssert {
+				assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
+			}
+		}
+	}
+}
+
+func assertEventsInOrder(t *testing.T, receivedEvents []ProcessEvent, tc testCase) {
+	// Verify we received the expected events
+	if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
+		t.Logf("received events: %v\n", receivedEvents)
+		return
+	}
+
+	for i, event := range receivedEvents {
+		assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), "unexpected event type for the event %d", i)
+		assertExecDetails(t, event, tc)
 	}
 }
 
@@ -455,37 +493,7 @@ func TestDetectorInitialScan(t *testing.T) {
 				return
 			}
 
-			// Verify we received the expected events
-			if !assert.Len(t, receivedEvents, len(tc.expectedEvents), "unexpected number of events") {
-				t.Logf("received events: %v\n", receivedEvents)
-				return
-			}
-
-			for i, event := range receivedEvents {
-				assert.Equal(t, tc.expectedEvents[i].String(), event.EventType.String(), "unexpected event type for the event %d", i)
-				if event.ExecDetails != nil {
-					// use the resolved path if one is relevant to check the actual expected executable is reported
-					expectedPath := tc.exePath
-					resolved, err := filepath.EvalSymlinks(expectedPath)
-					if err == nil {
-						expectedPath = resolved
-					}
-					assert.Equal(t, expectedPath, event.ExecDetails.ExePath, "unexpected executable path")
-
-					var envVarsToAssert map[string]string
-					if len(tc.envVarsToAssert) > 0 {
-						envVarsToAssert = tc.envVarsToAssert
-					} else {
-						envVarsToAssert = tc.envVarsForExec
-					}
-
-					if len(envVarsToAssert) > 0 {
-						for k, v := range envVarsToAssert {
-							assert.Equal(t, v, event.ExecDetails.Environments[k], "unexpected environment variable value")
-						}
-					}
-				}
-			}
+			assertEventsInOrder(t, receivedEvents, tc)
 		})
 	}
 }
