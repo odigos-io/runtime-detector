@@ -32,8 +32,8 @@ jobs:
               go-version: ${{ env.go_version }}
           - name: make docker-generate
             run: make docker-generate
-          - name: make test/bin/file_open
-            run: make test/bin/file_open
+          - name: make compile-c-tests
+            run: make compile-c-tests
           - name: verify output
             run: make check-clean-work-tree
           - name: Install vimto

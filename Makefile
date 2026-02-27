@@ -43,6 +43,8 @@ generate:
 docker-generate:
 	docker run --rm -v $(shell pwd):/app $(BASE_IMAGE) /bin/sh -c "cd ../app && make generate"
 
+compile-c-tests: $(FILE_OPEN_PROG_BIN) $(THREAD_EXEC_PROG_BIN)
+
 $(FILE_OPEN_PROG_BIN): test/c_processes/file_open.c | $(TESTS_BIN_DIR)
 	gcc test/c_processes/file_open.c -o $(FILE_OPEN_PROG_BIN)
 
