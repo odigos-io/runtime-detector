@@ -205,6 +205,20 @@ func TestDetector(t *testing.T) {
 			args:           []string{},
 			shouldDetect:   false,
 		},
+		{
+			name:              "non-leader thread exec is reported correctly",
+			envVarsForExec:    map[string]string{"USER_ENV": "value"},
+			exePath:           filepath.Join(currentDir, "test/bin/thread_exec"),
+			args:              []string{},
+			shouldDetect:      true,
+			minDurationFilter: &zeroDurationFilter,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessExitEvent,
+				ProcessExecEvent,
+				ProcessExitEvent,
+			},
+		},
 	}
 
 	for _, tc := range testCases {

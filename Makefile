@@ -5,6 +5,7 @@ REPODIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 BPF_INCLUDE += -I${REPODIR}/internal/headers
 TESTS_BIN_DIR = test/bin
 FILE_OPEN_PROG_BIN = ${TESTS_BIN_DIR}/file_open
+THREAD_EXEC_PROG_BIN = ${TESTS_BIN_DIR}/thread_exec
 BASE_IMAGE = keyval/odiglet-base:v1.10
 
 GOLANGCI_LINT_VERSION := v2.7.2
@@ -45,6 +46,9 @@ docker-generate:
 $(FILE_OPEN_PROG_BIN): test/c_processes/file_open.c | $(TESTS_BIN_DIR)
 	gcc test/c_processes/file_open.c -o $(FILE_OPEN_PROG_BIN)
 
+$(THREAD_EXEC_PROG_BIN): test/c_processes/thread_exec.c | $(TESTS_BIN_DIR)
+	gcc test/c_processes/thread_exec.c -o $(THREAD_EXEC_PROG_BIN) -lpthread
+
 .PHONY: docker-test-debian docker-test-alpine
 docker-test:
 	docker run --rm \
@@ -83,7 +87,7 @@ docker-test-alpine:
 			make test'
 
 .PHONY: test
-test: generate $(FILE_OPEN_PROG_BIN)
+test: generate $(FILE_OPEN_PROG_BIN) $(THREAD_EXEC_PROG_BIN)
 	go test -v ./...
 
 .PHONY: build
