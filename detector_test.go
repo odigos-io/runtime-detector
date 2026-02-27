@@ -216,10 +216,10 @@ func TestDetector(t *testing.T) {
 			eventsNotInOrder:  true,
 			minDurationFilter: &zeroDurationFilter,
 			expectedEvents: []ProcessEventType{
-				ProcessExecEvent,
-				ProcessExitEvent,
-				ProcessExecEvent,
-				ProcessExitEvent,
+				ProcessExecEvent, // initial exec of this binary
+				ProcessExitEvent, // leader is killed by the kernel after the non-leader thread's execve
+				ProcessExecEvent, // non-leader thread's exec succeeds — this binary in --child mode
+				ProcessExitEvent, // process exits after sleep
 			},
 		},
 	}

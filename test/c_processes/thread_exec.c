@@ -4,17 +4,10 @@
  * Mode 1 (default, no args):
  *   The main thread creates a second thread. The second thread sleeps briefly
  *   and then calls execve on itself with the "--child" flag.
- *   Because a non-leader thread calls execve, the kernel performs de_thread():
- *   it kills the original leader and changes the calling thread's pid to tgid.
+ *   Because a non-leader thread calls execve, the kernel kills the original leader and changes the calling thread's pid to tgid.
  *
  * Mode 2 (--child):
  *   Just sleep and exit. This is the target of the non-leader thread's exec.
- *
- * Expected detector events (with zero duration filter):
- *   ProcessExecEvent  (initial exec of this binary)
- *   ProcessExitEvent  (leader is killed by the kernel after the non-leader thread's execve)
- *   ProcessExecEvent  (non-leader thread's exec succeeds — this binary in --child mode)
- *   ProcessExitEvent  (process exits after sleep)
  */
 #define _GNU_SOURCE
 #include <stdio.h>
