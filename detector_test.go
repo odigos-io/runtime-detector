@@ -222,6 +222,21 @@ func TestDetector(t *testing.T) {
 				ProcessExitEvent, // process exits after sleep
 			},
 		},
+		{
+			name:              "non-leader thread fork child is detected",
+			envVarsForExec:    map[string]string{"USER_ENV": "value"},
+			exePath:           filepath.Join(currentDir, "test/bin/thread_fork"),
+			args:              []string{},
+			shouldDetect:      true,
+			eventsNotInOrder:  true,
+			minDurationFilter: &zeroDurationFilter,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent, // initial exec of thread_fork
+				ProcessForkEvent, // child created by the non-leader thread's fork
+				ProcessExitEvent, // child exits
+				ProcessExitEvent, // parent exits
+			},
+		},
 	}
 
 	for _, tc := range testCases {

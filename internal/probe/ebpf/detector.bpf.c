@@ -462,25 +462,23 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
         return 0;
     }
 
-    u32 parent_pid = (u32)BPF_CORE_READ(parent, pid);
-    u32 child_pid = (u32)BPF_CORE_READ(child, pid);
-
     // filter only relevant pids based on the parent
     // check if that this clone/fork is called from a process we are tracking
-    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
+    // since fork can be called by a non-leader thread, we need to check the parent tgid in the map
+    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_tgid);
     if (found == NULL) {
         return 0;
     }
 
     pids_in_ns_t pids = {0};
 
-    ret_code = get_pid_for_configured_ns(child, &pids, child_pid);
+    ret_code = get_pid_for_configured_ns(child, &pids, child_tgid);
     if (ret_code < 0) {
         return 0;
     }
 
     // track this child pid
-    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_pid, &pids.configured_ns_pid, BPF_ANY);
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_tgid, &pids.configured_ns_pid, BPF_ANY);
     if (ret_code != 0) {
         return 0;
     }
