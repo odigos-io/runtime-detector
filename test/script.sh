@@ -6,7 +6,7 @@
 echo "Running bash script"
 
 for i in {1..10}; do
-    sleep 0.08
+    sleep 0.04
 done
 
 echo "Bash script completed"

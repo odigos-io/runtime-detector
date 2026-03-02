@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -511,6 +513,95 @@ func TestDetectorInitialScan(t *testing.T) {
 			assertEventsInOrder(t, receivedEvents, tc)
 		})
 	}
+}
+
+func TestSignalFork(t *testing.T) {
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	signalForkBin := filepath.Join(currentDir, "test/bin/signal_fork")
+
+	events := make(chan ProcessEvent, 100)
+
+	// Start the target process BEFORE the detector.
+	cmd := exec.Command(signalForkBin)
+	cmd.Env = append(os.Environ(), "USER_ENV=value")
+
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	err = cmd.Start()
+	require.NoError(t, err)
+	defer func() {
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+		_ = cmd.Wait()
+	}()
+
+	// Wait for the process to signal readiness.
+	scanner := bufio.NewScanner(stdout)
+	require.True(t, scanner.Scan(), "expected 'ready' line from signal_fork")
+	require.Equal(t, "ready", scanner.Text())
+
+	// Now start the detector — this triggers the initial scan and should pick up
+	// the already-running signal_fork process.
+	opts := []DetectorOption{
+		WithMinDuration(0),
+		WithExePathsToFilter(bashLocation),
+		WithEnvironments("USER_ENV"),
+		WithEnvPrefixFilter("USER_E"),
+	}
+
+	d, err := NewDetector(events, opts...)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go func() {
+		err := d.Run(ctx)
+		require.NoError(t, err)
+	}()
+
+	// Collect the initial exec event from the initial scan.
+	var execEvent ProcessEvent
+	select {
+	case execEvent = <-events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for initial exec event")
+	}
+	assert.Equal(t, ProcessExecEvent.String(), execEvent.EventType.String(), "first event should be exec")
+	assert.Equal(t, signalForkBin, execEvent.ExecDetails.ExePath)
+	t.Logf("got exec event for pid %d\n", execEvent.PID)
+
+	time.Sleep(time.Second)
+	// Send SIGUSR1 to trigger a fork inside the target process.
+	err = cmd.Process.Signal(syscall.SIGUSR1)
+	require.NoError(t, err)
+
+	// Collect fork event
+	var forkEvent ProcessEvent
+	select {
+	case forkEvent = <-events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting fork event")
+	}
+	assert.Equal(t, ProcessForkEvent.String(), forkEvent.EventType.String(), "second event should be fork")
+
+	// Send SIGTERM to trigger exit inside the target process.
+	err = cmd.Process.Signal(syscall.SIGTERM)
+	require.NoError(t, err)
+
+	// Collect exit event
+	var exitEvent ProcessEvent
+	select {
+	case exitEvent = <-events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for exit event")
+	}
+	assert.Equal(t, ProcessExitEvent.String(), exitEvent.EventType.String(), "third event should be exit")
 }
 
 func envVarsToSlice(envVars map[string]string) []string {

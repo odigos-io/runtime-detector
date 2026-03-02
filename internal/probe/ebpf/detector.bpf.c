@@ -463,35 +463,44 @@ int BPF_PROG(tracepoint_btf__sched__sched_process_fork, struct task_struct *pare
     }
 
     // filter only relevant pids based on the parent
-    // check if that this clone/fork is called from a process we are tracking
-    // since fork can be called by a non-leader thread, we need to check the parent tgid in the map
-    void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_tgid);
+    // check if that this clone/fork is called from a process we are tracking.
+    // since fork can be called by a non-leader thread, we must use the group leader's task
+    // since the execve probe updates the map based on tgid.
+    // In addition, user-space can write to user_pid_to_container_pid map in order to tell us to track this process.
+    // hence we need to look based on that map, otherwise we might miss the event.
+    struct task_struct *parent_leader = BPF_CORE_READ(parent, group_leader);
+    pids_in_ns_t parent_pids = {0};
+    ret_code = get_pid_for_configured_ns(parent_leader, &parent_pids, parent_tgid);
+    if (ret_code < 0) {
+        return 0;
+    }
+    void *found = bpf_map_lookup_elem(&user_pid_to_container_pid, &parent_pids.configured_ns_pid);
     if (found == NULL) {
         return 0;
     }
 
-    pids_in_ns_t pids = {0};
+    pids_in_ns_t child_pids = {0};
 
-    ret_code = get_pid_for_configured_ns(child, &pids, child_tgid);
+    ret_code = get_pid_for_configured_ns(child, &child_pids, child_tgid);
     if (ret_code < 0) {
         return 0;
     }
 
     // track this child pid
-    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_tgid, &pids.configured_ns_pid, BPF_ANY);
+    ret_code = bpf_map_update_elem(&tracked_pids_to_ns_pids, &child_tgid, &child_pids.configured_ns_pid, BPF_ANY);
     if (ret_code != 0) {
         return 0;
     }
 
     // populate the map with the container pid, so that user space can read it
-    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
+    ret_code = bpf_map_update_elem(&user_pid_to_container_pid, &child_pids.configured_ns_pid, &child_pids.last_level_pid, BPF_ANY);
     if (ret_code != 0) {
         return 0;
     }
 
     process_event_t event = {
         .type = PROCESS_FORK,
-        .pid = pids.configured_ns_pid,
+        .pid = child_pids.configured_ns_pid,
     };
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
@@ -507,7 +516,13 @@ int tracepoint__sched__sched_process_fork(struct trace_event_raw_sched_process_f
     // check if that this clone/fork is called from a process we are tracking (went through execve)
     void *found = bpf_map_lookup_elem(&tracked_pids_to_ns_pids, &parent_pid);
     if (found == NULL) {
-        return 0;
+        // fallback to try the user_pid map, this can be populated if the user call TrackProcesses
+        // for an already running process before the execve probe was attached
+        // this will only work if user space is running in the host pid namespace
+        found = bpf_map_lookup_elem(&user_pid_to_container_pid, &parent_pid);
+        if (found == NULL) {
+            return 0;
+        }
     }
 
     // we can't make sure here that the child pid is a new process, and not a thread.

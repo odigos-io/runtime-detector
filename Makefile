@@ -7,6 +7,7 @@ TESTS_BIN_DIR = test/bin
 FILE_OPEN_PROG_BIN = ${TESTS_BIN_DIR}/file_open
 THREAD_EXEC_PROG_BIN = ${TESTS_BIN_DIR}/thread_exec
 THREAD_FORK_PROG_BIN = ${TESTS_BIN_DIR}/thread_fork
+SIGNAL_FORK_PROG_BIN = ${TESTS_BIN_DIR}/signal_fork
 BASE_IMAGE = keyval/odiglet-base:v1.10
 
 GOLANGCI_LINT_VERSION := v2.7.2
@@ -44,7 +45,7 @@ generate:
 docker-generate:
 	docker run --rm -v $(shell pwd):/app $(BASE_IMAGE) /bin/sh -c "cd ../app && make generate"
 
-compile-c-tests: $(FILE_OPEN_PROG_BIN) $(THREAD_EXEC_PROG_BIN) $(THREAD_FORK_PROG_BIN)
+compile-c-tests: $(FILE_OPEN_PROG_BIN) $(THREAD_EXEC_PROG_BIN) $(THREAD_FORK_PROG_BIN) $(SIGNAL_FORK_PROG_BIN)
 
 $(FILE_OPEN_PROG_BIN): test/c_processes/file_open.c | $(TESTS_BIN_DIR)
 	gcc test/c_processes/file_open.c -o $(FILE_OPEN_PROG_BIN)
@@ -54,6 +55,9 @@ $(THREAD_EXEC_PROG_BIN): test/c_processes/thread_exec.c | $(TESTS_BIN_DIR)
 
 $(THREAD_FORK_PROG_BIN): test/c_processes/thread_fork.c | $(TESTS_BIN_DIR)
 	gcc test/c_processes/thread_fork.c -o $(THREAD_FORK_PROG_BIN) -lpthread
+
+$(SIGNAL_FORK_PROG_BIN): test/c_processes/signal_fork.c | $(TESTS_BIN_DIR)
+	gcc test/c_processes/signal_fork.c -o $(SIGNAL_FORK_PROG_BIN)
 
 .PHONY: docker-test-debian docker-test-alpine
 docker-test:
