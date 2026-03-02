@@ -68,6 +68,7 @@ const (
 
 	execFilesToFilterMapName = "exec_files_to_filter"
 	detectorConfigMapName    = "detector_config"
+	trackedPidsMapName       = "tracked_pids_to_ns_pids"
 )
 
 type Config struct {

@@ -104,6 +104,7 @@ type bpf_smallMapSpecs struct {
 	ExecFilesToFilter     *ebpf.MapSpec `ebpf:"exec_files_to_filter"`
 	FileOpensByPid        *ebpf.MapSpec `ebpf:"file_opens_by_pid"`
 	FilesOpenToTrack      *ebpf.MapSpec `ebpf:"files_open_to_track"`
+	OngoingExecTgids      *ebpf.MapSpec `ebpf:"ongoing_exec_tgids"`
 	TrackedPidsToNsPids   *ebpf.MapSpec `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.MapSpec `ebpf:"user_pid_to_container_pid"`
 }
@@ -140,6 +141,7 @@ type bpf_smallMaps struct {
 	ExecFilesToFilter     *ebpf.Map `ebpf:"exec_files_to_filter"`
 	FileOpensByPid        *ebpf.Map `ebpf:"file_opens_by_pid"`
 	FilesOpenToTrack      *ebpf.Map `ebpf:"files_open_to_track"`
+	OngoingExecTgids      *ebpf.Map `ebpf:"ongoing_exec_tgids"`
 	TrackedPidsToNsPids   *ebpf.Map `ebpf:"tracked_pids_to_ns_pids"`
 	UserPidToContainerPid *ebpf.Map `ebpf:"user_pid_to_container_pid"`
 }
@@ -152,6 +154,7 @@ func (m *bpf_smallMaps) Close() error {
 		m.ExecFilesToFilter,
 		m.FileOpensByPid,
 		m.FilesOpenToTrack,
+		m.OngoingExecTgids,
 		m.TrackedPidsToNsPids,
 		m.UserPidToContainerPid,
 	)
