@@ -127,7 +127,11 @@ func getPodIDContainerNameFromReader(r io.Reader) (string, string, error) {
 	return "", "", ErrorNotK8sProcess
 }
 
-func isProcessRelevantToOdigos(pid int, prefix string) bool {
+func isEnvPrefixExist(pid int, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+
 	path := procFile(pid, "environ")
 	fileContent, err := os.ReadFile(path)
 	if err != nil {
@@ -157,7 +161,7 @@ func AllRelevantProcesses(envPrefix string, exePathsToFilter map[string]struct{}
 			continue
 		}
 
-		if !isProcessRelevantToOdigos(int(pid), envPrefix) {
+		if !isEnvPrefixExist(int(pid), envPrefix) {
 			continue
 		}
 
@@ -173,6 +177,11 @@ func AllRelevantProcesses(envPrefix string, exePathsToFilter map[string]struct{}
 }
 
 func GetEnvironmentVars(pid int, keys map[string]struct{}) (map[string]string, error) {
+	// avoid opening the file if no keys are requested
+	if len(keys) == 0 {
+		return map[string]string{}, nil
+	}
+
 	path := procFile(pid, "environ")
 	fileContent, err := os.ReadFile(path)
 	if err != nil {
