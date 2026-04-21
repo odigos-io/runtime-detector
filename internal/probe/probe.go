@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"sync"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/features"
@@ -39,6 +40,12 @@ type Probe struct {
 	openFilesToTrack  []string
 	execFilesToFilter map[string]struct{}
 	btfDisabled       bool
+
+	// pendingPIDsToTrack holds the PIDs that should be tracked by the probe,
+	// since TrackPIDs can be called before the probe is fully loaded and the eBPF collection is not available yet.
+	// Once the probe is loaded, these PIDs will be written to the eBPF map and tracked properly.
+	pendingPIDsToTrack []int
+	mu                 sync.Mutex
 }
 
 type processEvent struct {
@@ -117,6 +124,20 @@ func (p *Probe) LoadAndAttach() error {
 
 	if err := p.attach(); err != nil {
 		return fmt.Errorf("can't attach probe: %w", err)
+	}
+
+	// TrackPIDs might be called before the probe is fully loaded,
+	// in that case we need to write the pending PIDs to the map now that the probe is loaded
+	p.mu.Lock()
+	pending := p.pendingPIDsToTrack
+	p.pendingPIDsToTrack = nil
+	p.mu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	err = p.writePIDsToMap(pending)
+	if err != nil {
+		return fmt.Errorf("can't write pending PIDs to map: %w", err)
 	}
 
 	return nil
@@ -410,6 +431,25 @@ func (p *Probe) GetContainerPID(pid int) (int, error) {
 }
 
 func (p *Probe) TrackPIDs(pids []int) error {
+	p.mu.Lock()
+	if p.c == nil {
+		// probe is not fully loaded yet,
+		// store the PIDs in the pending list to be written to the map once the probe is loaded
+		p.pendingPIDsToTrack = append(p.pendingPIDsToTrack, pids...)
+		p.mu.Unlock()
+		return nil
+	}
+	p.mu.Unlock()
+
+	// probe is loaded, write the PIDs to the map to be tracked by the probe
+	return p.writePIDsToMap(pids)
+}
+
+func (p *Probe) writePIDsToMap(pids []int) error {
+	if p.c == nil {
+		return errors.New("eBPF collection is not loaded")
+	}
+
 	m, ok := p.c.Maps[pidToContainerPIDMapName]
 	if !ok {
 		return errors.New("eBPF maps are not loaded")
