@@ -604,6 +604,71 @@ func TestSignalFork(t *testing.T) {
 	assert.Equal(t, ProcessExitEvent.String(), exitEvent.EventType.String(), "third event should be exit")
 }
 
+func TestTrackProcessesBeforeRun(t *testing.T) {
+	require.NotEmpty(t, sleepLocation, "sleep must be installed for the test")
+
+	// start a process before starting the detector
+	cmd := exec.Command(sleepLocation, "30")
+	require.NoError(t, cmd.Start())
+	proc := &testProcess{cmd: cmd, pid: cmd.Process.Pid}
+	defer proc.stop()
+
+	events := make(chan ProcessEvent, 100)
+	d, err := NewDetector(events,
+		// set no duration filter
+		WithMinDuration(0),
+		// our test process doesn't have this env var,
+		// but we want to make sure TrackProcesses causes the detector to emit an exit event for the tracked pid
+		// even if the process doesn't match the environment variable filters
+		WithEnvPrefixFilter("USER_E"),
+	)
+	require.NoError(t, err)
+
+	// the detector should handle TrackProcesses being called before Run
+	require.NotPanics(t, func() {
+		err := d.TrackProcesses([]int{proc.pid})
+		require.NoError(t, err)
+	}, "TrackProcesses should not panic when called before Run")
+
+	// run the detector and kill the target process before it exits
+	// we expect to receive an exit event
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		err := d.Run(ctx)
+		require.NoError(t, err)
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	proc.stop()
+
+	var gotExit bool
+	deadline := time.After(2 * time.Second)
+collect:
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				break collect
+			}
+			if e.PID == proc.pid && e.EventType == ProcessExitEvent {
+				gotExit = true
+				break collect
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+
+	cancel()
+	<-runDone
+
+	require.True(t, gotExit, "expected exit event for tracked pid %d registered before Run", proc.pid)
+}
+
 func envVarsToSlice(envVars map[string]string) []string {
 	var result []string
 	for k, v := range envVars {
