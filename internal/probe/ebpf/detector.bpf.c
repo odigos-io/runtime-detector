@@ -393,14 +393,56 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_exit_execve")
-int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
-    u64 pid_tgid = bpf_get_current_pid_tgid();
+static __always_inline int report_exec_event(void *ctx, u64 pid_tgid) {
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     u32 tgid = (u32)(pid_tgid >> 32);
     pids_in_ns_t pids = {0};
     long ret = 0;
     struct task_struct *task = NULL;
+
+#ifdef NO_BTF
+    pids.configured_ns_pid = pid;
+    pids.last_level_pid = 0;
+#else
+    task = (struct task_struct *)bpf_get_current_task();
+    ret = get_pid_for_configured_ns(task, &pids, pid);
+    if (ret < 0) {
+        return ret;
+    }
+#endif
+
+    ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
+    if (ret != 0) {
+        return ret;
+    }
+
+    process_event_t event = {
+        .type = PROCESS_EXEC,
+        .pid = pids.configured_ns_pid,
+    };
+
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    return 0;
+}
+
+// this prove is only used as a fallback when the execve syscall are not present in the kernel,
+// it is usually the case on older kernels (e.g RHEL7 which patches eBPF functionality).
+SEC("tracepoint/sched/sched_process_exec")
+int tracepoint__sched__sched_process_exec(struct trace_event_raw_sched_process_exec* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    report_exec_event(ctx, pid_tgid);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_execve")
+int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 tgid = (u32)(pid_tgid >> 32);
 
     if (ctx->ret < 0) {
         // exec failed
@@ -412,33 +454,7 @@ int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
         return 0;
     }
 
-#ifdef NO_BTF
-    pids.configured_ns_pid = pid;
-    pids.last_level_pid = 0;
-#else
-    task = (struct task_struct *)bpf_get_current_task();
-    ret = get_pid_for_configured_ns(task, &pids, pid);
-    if (ret < 0) {
-        goto cleanup;
-    }
-#endif
-
-    ret = bpf_map_update_elem(&tracked_pids_to_ns_pids, &pid, &pids.configured_ns_pid, BPF_ANY);
-    if (ret != 0) {
-        goto cleanup;
-    }
-
-    ret = bpf_map_update_elem(&user_pid_to_container_pid, &pids.configured_ns_pid, &pids.last_level_pid, BPF_ANY);
-    if (ret != 0) {
-        goto cleanup;
-    }
-
-    process_event_t event = {
-        .type = PROCESS_EXEC,
-        .pid = pids.configured_ns_pid,
-    };
-
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+    report_exec_event(ctx, pid_tgid);
 
 cleanup:
     bpf_map_delete_elem(&ongoing_exec_tgids, &tgid);

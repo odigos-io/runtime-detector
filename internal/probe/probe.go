@@ -62,6 +62,7 @@ const (
 	processForkNoBTFProgramName  = "tracepoint__sched__sched_process_fork"
 	processForkProgramName       = "tracepoint_btf__sched__sched_process_fork"
 	processExitProgramName       = "tracepoint__sched__sched_process_exit"
+	processExecProgramName       = "tracepoint__sched__sched_process_exec"
 	pidToContainerPIDMapName     = "user_pid_to_container_pid"
 	envPrefixMapName             = "env_prefix"
 
@@ -284,17 +285,32 @@ func (p *Probe) attach() error {
 	}
 	p.reader = reader
 
+	// try to attach to the syscall entry point of execve first
 	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
 	if err != nil {
-		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+		}
+		// as a fallback for old kernels that don't have the sys_enter_execve tracepoint, try to attach to sched_process_exec tracepoint
+		// which is available in older kernels. this comes with the limitation that we won't be able to apply the env-prefix filter for exec events.
+		fallbackLink, fallbackErr := link.Tracepoint("sched", "sched_process_exec", p.c.Programs[processExecProgramName], nil)
+		if fallbackErr != nil {
+			return fmt.Errorf("can't attach probe to sys_enter_execve: %w, also failed to attach to sched_process_exec: %w", err, fallbackErr)
+		}
+		p.logger.Warn("syscalls/sys_enter_execve tracepoint unavailable; "+
+			"falling back to sched/sched_process_exec for exec detection. "+
+			"The eBPF env-prefix filter will NOT be applied to exec events.",
+			"envPrefixFilter", p.envPrefixFilter)
+		p.links = append(p.links, fallbackLink)
+	} else {
+		// if we managed to attach to the entry point of execve, we need to attach to its return point as well.
+		p.links = append(p.links, l)
+		l, err = link.Tracepoint("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
+		}
+		p.links = append(p.links, l)
 	}
-	p.links = append(p.links, l)
-
-	l, err = link.Tracepoint("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
-	if err != nil {
-		return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
-	}
-	p.links = append(p.links, l)
 
 	l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
 	if err != nil {
