@@ -1,15 +1,21 @@
 package probe
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/odigos-io/runtime-detector/internal/common"
 )
 
 func repeatedString(length int, s string) string {
@@ -320,4 +326,96 @@ func assertMapsAreEmpty(t *testing.T, p *Probe) {
 		assert.Equal(t, 0, count, "map %s is not empty, have %d entries", mapName, count)
 		assert.NoError(t, iterator.Err())
 	}
+}
+
+// recordingConsumer is a common.ProcessesFilter that records every event it
+// receives, used by tests to assert which events the probe reported.
+type recordingConsumer struct {
+	mu     sync.Mutex
+	events []common.PIDEvent
+}
+
+func (c *recordingConsumer) Add(pid int, eventType common.EventType) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, common.PIDEvent{Pid: pid, Type: eventType})
+}
+
+func (c *recordingConsumer) Remove(pid int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// ReadEvents calls Remove for exit events, record it as such.
+	c.events = append(c.events, common.PIDEvent{Pid: pid, Type: common.EventTypeExit})
+}
+
+func (c *recordingConsumer) Close() error { return nil }
+
+func (c *recordingConsumer) has(pid int, eventType common.EventType) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.events {
+		if e.Pid == pid && e.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func TestExecFallbackToSchedProcessExec(t *testing.T) {
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not found in PATH, skipping")
+	}
+
+	consumer := &recordingConsumer{}
+
+	var (
+		enterExecveAttempted bool
+		schedExecAttached    bool
+	)
+
+	p := &Probe{
+		logger:   slog.Default(),
+		consumer: consumer,
+		// Force the fallback path: pretend the kernel is missing the
+		// syscalls/sys_enter_execve tracepoint, while delegating every other
+		// attach to the real link.Tracepoint.
+		attachTracepointFn: func(group, name string, prog *ebpf.Program, opts *link.TracepointOptions) (link.Link, error) {
+			if group == "syscalls" && name == "sys_enter_execve" {
+				enterExecveAttempted = true
+				return nil, os.ErrNotExist
+			}
+			if group == "sched" && name == "sched_process_exec" {
+				schedExecAttached = true
+			}
+			return link.Tracepoint(group, name, prog, opts)
+		},
+	}
+
+	require.NoError(t, p.load(0))
+	defer p.Close()
+	require.NoError(t, p.attach())
+
+	require.True(t, enterExecveAttempted, "expected an attempt to attach sys_enter_execve")
+	require.True(t, schedExecAttached, "expected the fallback sched_process_exec tracepoint to be attached")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go p.ReadEvents(ctx)
+
+	cmd := exec.Command(sleepPath, "1")
+	require.NoError(t, cmd.Start())
+	pid := cmd.Process.Pid
+	require.NoError(t, cmd.Wait())
+
+	assert.Eventually(t, func() bool {
+		return consumer.has(pid, common.EventTypeExec)
+	}, 5*time.Second, 20*time.Millisecond,
+		"expected an exec event for pid %d via the sched_process_exec fallback", pid)
+
+	assert.Eventually(t, func() bool {
+		return consumer.has(pid, common.EventTypeExit)
+	}, 5*time.Second, 20*time.Millisecond,
+		"expected an exit event for pid %d via the sched_process_exec fallback", pid)
 }
