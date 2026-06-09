@@ -222,7 +222,8 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 		// (i.e we missed the exec event), try to get the container PID from the /proc file system
 		cPID, err = proc.InnerMostPID(pid)
 		if err != nil {
-			d.l.Error("failed to get container PID", "pid", pid, "error", err)
+			// on kernels older than 4.1, the inner most PID might not be available in proc fs.
+			d.l.Debug("failed to get container PID", "pid", pid, "error", err)
 		}
 	}
 

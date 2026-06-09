@@ -46,6 +46,9 @@ type Probe struct {
 	// Once the probe is loaded, these PIDs will be written to the eBPF map and tracked properly.
 	pendingPIDsToTrack []int
 	mu                 sync.Mutex
+
+	// for testing purposes, allowing to override the attach function.
+	attachTracepointFn func(group, name string, prog *ebpf.Program, opts *link.TracepointOptions) (link.Link, error)
 }
 
 type processEvent struct {
@@ -62,6 +65,7 @@ const (
 	processForkNoBTFProgramName  = "tracepoint__sched__sched_process_fork"
 	processForkProgramName       = "tracepoint_btf__sched__sched_process_fork"
 	processExitProgramName       = "tracepoint__sched__sched_process_exit"
+	processExecProgramName       = "tracepoint__sched__sched_process_exec"
 	pidToContainerPIDMapName     = "user_pid_to_container_pid"
 	envPrefixMapName             = "env_prefix"
 
@@ -97,11 +101,12 @@ type Config struct {
 
 func New(logger *slog.Logger, f common.ProcessesFilter, config Config) *Probe {
 	return &Probe{
-		logger:            logger,
-		consumer:          f,
-		envPrefixFilter:   config.EnvPrefixFilter,
-		openFilesToTrack:  config.OpenFilesToTrack,
-		execFilesToFilter: config.ExecFilesToFilter,
+		logger:             logger,
+		consumer:           f,
+		envPrefixFilter:    config.EnvPrefixFilter,
+		openFilesToTrack:   config.OpenFilesToTrack,
+		execFilesToFilter:  config.ExecFilesToFilter,
+		attachTracepointFn: link.Tracepoint,
 	}
 }
 
@@ -278,25 +283,48 @@ func (p *Probe) attach() error {
 		return errors.New("no eBPF collection loaded")
 	}
 
+	if p.attachTracepointFn == nil {
+		p.attachTracepointFn = link.Tracepoint
+	}
+
 	reader, err := perf.NewReader(p.c.Maps[eventsMapName], PerfBufferDefaultSizeInPages*os.Getpagesize())
 	if err != nil {
 		return fmt.Errorf("can't create perf reader: %w", err)
 	}
 	p.reader = reader
 
-	l, err := link.Tracepoint("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
+	// try to attach to the syscall entry point of execve first
+	l, err := p.attachTracepointFn("syscalls", "sys_enter_execve", p.c.Programs[execveSyscallProgramName], nil)
 	if err != nil {
-		return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("can't attach probe sys_enter_execve: %w", err)
+		}
+		// as a fallback for old kernels that don't have the sys_enter_execve tracepoint, try to attach to sched_process_exec tracepoint
+		// which is available in older kernels. this comes with the limitation that we won't be able to apply the env-prefix filter for exec events.
+		fallbackLink, fallbackErr := p.attachTracepointFn("sched", "sched_process_exec", p.c.Programs[processExecProgramName], nil)
+		if fallbackErr != nil {
+			return fmt.Errorf("can't attach probe to sys_enter_execve: %w, also failed to attach to sched_process_exec: %w", err, fallbackErr)
+		}
+		p.logger.Warn(
+			"syscalls/sys_enter_execve tracepoint is unavailable on this kernel; "+
+				"falling back to the sched/sched_process_exec tracepoint for exec detection. "+
+				"In this mode the eBPF program cannot pre-filter execs by env-prefix, so every process "+
+				"exec is forwarded to user space (higher overhead), and fork/file-open events are not "+
+				"env-prefix filtered.",
+			"envPrefixFilter", p.envPrefixFilter,
+		)
+		p.links = append(p.links, fallbackLink)
+	} else {
+		// if we managed to attach to the entry point of execve, we need to attach to its return point as well.
+		p.links = append(p.links, l)
+		l, err = p.attachTracepointFn("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
+		if err != nil {
+			return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
+		}
+		p.links = append(p.links, l)
 	}
-	p.links = append(p.links, l)
 
-	l, err = link.Tracepoint("syscalls", "sys_exit_execve", p.c.Programs[execveSyscallExitProgramName], nil)
-	if err != nil {
-		return fmt.Errorf("can't attach probe sys_exit_execve: %w", err)
-	}
-	p.links = append(p.links, l)
-
-	l, err = link.Tracepoint("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
+	l, err = p.attachTracepointFn("sched", "sched_process_exit", p.c.Programs[processExitProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sched_process_exit: %w", err)
 	}
@@ -320,7 +348,7 @@ func (p *Probe) attach() error {
 			return errors.New("sched_process_fork program not found")
 		}
 
-		l, err = link.Tracepoint("sched", "sched_process_fork", prog, nil)
+		l, err = p.attachTracepointFn("sched", "sched_process_fork", prog, nil)
 		if err != nil {
 			return fmt.Errorf("can't attach probe sched_process_fork (no BTF): %w", err)
 		}
@@ -344,12 +372,12 @@ func (p *Probe) attachOpenPrograms() error {
 	// attach to open syscall
 	// open() is not present on arm64
 	if runtime.GOARCH != "arm64" {
-		l, err = link.Tracepoint("syscalls", "sys_enter_open", p.c.Programs[openSyscallProgramName], nil)
+		l, err = p.attachTracepointFn("syscalls", "sys_enter_open", p.c.Programs[openSyscallProgramName], nil)
 		if err != nil {
 			return fmt.Errorf("can't attach probe sys_enter_open: %w", err)
 		}
 		p.links = append(p.links, l)
-		l, err = link.Tracepoint("syscalls", "sys_exit_open", p.c.Programs[openSyscallExitProgramName], nil)
+		l, err = p.attachTracepointFn("syscalls", "sys_exit_open", p.c.Programs[openSyscallExitProgramName], nil)
 		if err != nil {
 			return fmt.Errorf("can't attach probe sys_exit_open: %w", err)
 		}
@@ -357,12 +385,12 @@ func (p *Probe) attachOpenPrograms() error {
 	}
 
 	// attach to openat syscall
-	l, err = link.Tracepoint("syscalls", "sys_enter_openat", p.c.Programs[openatSyscallProgramName], nil)
+	l, err = p.attachTracepointFn("syscalls", "sys_enter_openat", p.c.Programs[openatSyscallProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_enter_openat: %w", err)
 	}
 	p.links = append(p.links, l)
-	l, err = link.Tracepoint("syscalls", "sys_exit_openat", p.c.Programs[openatSyscallExitProgramName], nil)
+	l, err = p.attachTracepointFn("syscalls", "sys_exit_openat", p.c.Programs[openatSyscallExitProgramName], nil)
 	if err != nil {
 		return fmt.Errorf("can't attach probe sys_exit_openat: %w", err)
 	}
@@ -370,13 +398,13 @@ func (p *Probe) attachOpenPrograms() error {
 
 	// attach to openat2 syscall which is optional here
 	// since linux v5.5 support openat2(2), commit fddb5d430ad9 ("open: introduce openat2(2) syscall")
-	l, err = link.Tracepoint("syscalls", "sys_enter_openat2", p.c.Programs[openat2SyscallProgramName], nil)
+	l, err = p.attachTracepointFn("syscalls", "sys_enter_openat2", p.c.Programs[openat2SyscallProgramName], nil)
 	if err != nil {
 		p.logger.Debug("failed to attch openat2 tracepoint")
 		return nil
 	}
 	p.links = append(p.links, l)
-	l, err = link.Tracepoint("syscalls", "sys_exit_openat2", p.c.Programs[openat2SyscallExitProgramName], nil)
+	l, err = p.attachTracepointFn("syscalls", "sys_exit_openat2", p.c.Programs[openat2SyscallExitProgramName], nil)
 	if err != nil {
 		p.logger.Debug("failed to attch openat2 tracepoint")
 	}

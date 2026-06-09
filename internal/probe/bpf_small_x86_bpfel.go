@@ -82,6 +82,7 @@ type bpf_smallSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpf_smallProgramSpecs struct {
+	TracepointSchedSchedProcessExec    *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exec"`
 	TracepointSchedSchedProcessExit    *ebpf.ProgramSpec `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpen     *ebpf.ProgramSpec `ebpf:"tracepoint__syscalls__sys_enter_open"`
@@ -170,6 +171,7 @@ type bpf_smallVariables struct {
 //
 // It can be passed to loadBpf_smallObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpf_smallPrograms struct {
+	TracepointSchedSchedProcessExec    *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exec"`
 	TracepointSchedSchedProcessExit    *ebpf.Program `ebpf:"tracepoint__sched__sched_process_exit"`
 	TracepointSyscallsSysEnterExecve   *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_execve"`
 	TracepointSyscallsSysEnterOpen     *ebpf.Program `ebpf:"tracepoint__syscalls__sys_enter_open"`
@@ -184,6 +186,7 @@ type bpf_smallPrograms struct {
 
 func (p *bpf_smallPrograms) Close() error {
 	return _Bpf_smallClose(
+		p.TracepointSchedSchedProcessExec,
 		p.TracepointSchedSchedProcessExit,
 		p.TracepointSyscallsSysEnterExecve,
 		p.TracepointSyscallsSysEnterOpen,
