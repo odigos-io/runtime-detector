@@ -220,7 +220,7 @@ func (p *Probe) createCollection(spec *ebpf.CollectionSpec, ns uint32) (*ebpf.Co
 func (p *Probe) load(ns uint32) error {
 	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
-		return err
+		p.logger.Warn("failed to remove memlock limit, this might cause failures in loading eBPF maps", "error", err)
 	}
 
 	withBTFSpecFn := loadBpf
