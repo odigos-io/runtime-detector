@@ -40,6 +40,32 @@ type bpf_small_no_btfOpenFilenameT struct {
 	Buf [128]uint8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	bpf_small_no_btfMapDetectorConfig                     = "detector_config"
+	bpf_small_no_btfMapEnvPrefix                          = "env_prefix"
+	bpf_small_no_btfMapEvents                             = "events"
+	bpf_small_no_btfMapExecFilesToFilter                  = "exec_files_to_filter"
+	bpf_small_no_btfMapFileOpensByPid                     = "file_opens_by_pid"
+	bpf_small_no_btfMapFilesOpenToTrack                   = "files_open_to_track"
+	bpf_small_no_btfMapOngoingExecTgids                   = "ongoing_exec_tgids"
+	bpf_small_no_btfMapTrackedPidsToNsPids                = "tracked_pids_to_ns_pids"
+	bpf_small_no_btfMapUserPidToContainerPid              = "user_pid_to_container_pid"
+	bpf_small_no_btfProgTracepointSchedSchedProcessExec   = "tracepoint__sched__sched_process_exec"
+	bpf_small_no_btfProgTracepointSchedSchedProcessExit   = "tracepoint__sched__sched_process_exit"
+	bpf_small_no_btfProgTracepointSchedSchedProcessFork   = "tracepoint__sched__sched_process_fork"
+	bpf_small_no_btfProgTracepointSyscallsSysEnterExecve  = "tracepoint__syscalls__sys_enter_execve"
+	bpf_small_no_btfProgTracepointSyscallsSysEnterOpen    = "tracepoint__syscalls__sys_enter_open"
+	bpf_small_no_btfProgTracepointSyscallsSysEnterOpenat  = "tracepoint__syscalls__sys_enter_openat"
+	bpf_small_no_btfProgTracepointSyscallsSysEnterOpenat2 = "tracepoint__syscalls__sys_enter_openat2"
+	bpf_small_no_btfProgTracepointSyscallsSysExitExecve   = "tracepoint__syscalls__sys_exit_execve"
+	bpf_small_no_btfProgTracepointSyscallsSysExitOpen     = "tracepoint__syscalls__sys_exit_open"
+	bpf_small_no_btfProgTracepointSyscallsSysExitOpenat   = "tracepoint__syscalls__sys_exit_openat"
+	bpf_small_no_btfProgTracepointSyscallsSysExitOpenat2  = "tracepoint__syscalls__sys_exit_openat2"
+)
+
 // loadBpf_small_no_btf returns the embedded CollectionSpec for bpf_small_no_btf.
 func loadBpf_small_no_btf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_Bpf_small_no_btfBytes)
@@ -60,7 +86,7 @@ func loadBpf_small_no_btf() (*ebpf.CollectionSpec, error) {
 //	*bpf_small_no_btfMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBpf_small_no_btfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadBpf_small_no_btfObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadBpf_small_no_btf()
 	if err != nil {
 		return err

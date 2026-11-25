@@ -40,6 +40,32 @@ type bpfOpenFilenameT struct {
 	Buf [128]uint8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	bpfMapDetectorConfig                      = "detector_config"
+	bpfMapEnvPrefix                           = "env_prefix"
+	bpfMapEvents                              = "events"
+	bpfMapExecFilesToFilter                   = "exec_files_to_filter"
+	bpfMapFileOpensByPid                      = "file_opens_by_pid"
+	bpfMapFilesOpenToTrack                    = "files_open_to_track"
+	bpfMapOngoingExecTgids                    = "ongoing_exec_tgids"
+	bpfMapTrackedPidsToNsPids                 = "tracked_pids_to_ns_pids"
+	bpfMapUserPidToContainerPid               = "user_pid_to_container_pid"
+	bpfProgTracepointSchedSchedProcessExec    = "tracepoint__sched__sched_process_exec"
+	bpfProgTracepointSchedSchedProcessExit    = "tracepoint__sched__sched_process_exit"
+	bpfProgTracepointSyscallsSysEnterExecve   = "tracepoint__syscalls__sys_enter_execve"
+	bpfProgTracepointSyscallsSysEnterOpen     = "tracepoint__syscalls__sys_enter_open"
+	bpfProgTracepointSyscallsSysEnterOpenat   = "tracepoint__syscalls__sys_enter_openat"
+	bpfProgTracepointSyscallsSysEnterOpenat2  = "tracepoint__syscalls__sys_enter_openat2"
+	bpfProgTracepointSyscallsSysExitExecve    = "tracepoint__syscalls__sys_exit_execve"
+	bpfProgTracepointSyscallsSysExitOpen      = "tracepoint__syscalls__sys_exit_open"
+	bpfProgTracepointSyscallsSysExitOpenat    = "tracepoint__syscalls__sys_exit_openat"
+	bpfProgTracepointSyscallsSysExitOpenat2   = "tracepoint__syscalls__sys_exit_openat2"
+	bpfProgTracepointBtfSchedSchedProcessFork = "tracepoint_btf__sched__sched_process_fork"
+)
+
 // loadBpf returns the embedded CollectionSpec for bpf.
 func loadBpf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BpfBytes)
@@ -60,7 +86,7 @@ func loadBpf() (*ebpf.CollectionSpec, error) {
 //	*bpfMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBpfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadBpfObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadBpf()
 	if err != nil {
 		return err

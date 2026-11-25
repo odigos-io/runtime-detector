@@ -40,6 +40,32 @@ type bpf_no_btfOpenFilenameT struct {
 	Buf [128]uint8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	bpf_no_btfMapDetectorConfig                     = "detector_config"
+	bpf_no_btfMapEnvPrefix                          = "env_prefix"
+	bpf_no_btfMapEvents                             = "events"
+	bpf_no_btfMapExecFilesToFilter                  = "exec_files_to_filter"
+	bpf_no_btfMapFileOpensByPid                     = "file_opens_by_pid"
+	bpf_no_btfMapFilesOpenToTrack                   = "files_open_to_track"
+	bpf_no_btfMapOngoingExecTgids                   = "ongoing_exec_tgids"
+	bpf_no_btfMapTrackedPidsToNsPids                = "tracked_pids_to_ns_pids"
+	bpf_no_btfMapUserPidToContainerPid              = "user_pid_to_container_pid"
+	bpf_no_btfProgTracepointSchedSchedProcessExec   = "tracepoint__sched__sched_process_exec"
+	bpf_no_btfProgTracepointSchedSchedProcessExit   = "tracepoint__sched__sched_process_exit"
+	bpf_no_btfProgTracepointSchedSchedProcessFork   = "tracepoint__sched__sched_process_fork"
+	bpf_no_btfProgTracepointSyscallsSysEnterExecve  = "tracepoint__syscalls__sys_enter_execve"
+	bpf_no_btfProgTracepointSyscallsSysEnterOpen    = "tracepoint__syscalls__sys_enter_open"
+	bpf_no_btfProgTracepointSyscallsSysEnterOpenat  = "tracepoint__syscalls__sys_enter_openat"
+	bpf_no_btfProgTracepointSyscallsSysEnterOpenat2 = "tracepoint__syscalls__sys_enter_openat2"
+	bpf_no_btfProgTracepointSyscallsSysExitExecve   = "tracepoint__syscalls__sys_exit_execve"
+	bpf_no_btfProgTracepointSyscallsSysExitOpen     = "tracepoint__syscalls__sys_exit_open"
+	bpf_no_btfProgTracepointSyscallsSysExitOpenat   = "tracepoint__syscalls__sys_exit_openat"
+	bpf_no_btfProgTracepointSyscallsSysExitOpenat2  = "tracepoint__syscalls__sys_exit_openat2"
+)
+
 // loadBpf_no_btf returns the embedded CollectionSpec for bpf_no_btf.
 func loadBpf_no_btf() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_Bpf_no_btfBytes)
@@ -60,7 +86,7 @@ func loadBpf_no_btf() (*ebpf.CollectionSpec, error) {
 //	*bpf_no_btfMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBpf_no_btfObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadBpf_no_btfObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadBpf_no_btf()
 	if err != nil {
 		return err
