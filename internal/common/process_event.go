@@ -14,6 +14,8 @@ const (
 type PIDEvent struct {
 	Type EventType
 	Pid  int
+	// EnvPrefixFound is set for exec events in which eBPF found the env prefix in the environment passed to execve.
+	EnvPrefixFound bool
 }
 
 func (et EventType) String() string {

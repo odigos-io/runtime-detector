@@ -51,7 +51,7 @@ func (pe ProcessEventType) String() string {
 }
 
 type detailsFilterFn struct {
-	fn  func(int, *ProcessExecDetails) bool
+	fn  func(common.PIDEvent, *ProcessExecDetails) bool
 	msg string
 }
 
@@ -163,8 +163,10 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 
 	filters := []common.ProcessesFilter{durationFilter}
 
-	envFilterFn := func(pid int, details *ProcessExecDetails) bool {
-		if c.envPrefixFilter == "" {
+	envFilterFn := func(e common.PIDEvent, details *ProcessExecDetails) bool {
+		// processes can overwrite the memory holding their environment (e.g. when setting their title),
+		// so the environment read from /proc is checked only when eBPF could not find the prefix
+		if c.envPrefixFilter == "" || e.EnvPrefixFound {
 			return false
 		}
 		for k := range details.Environments {
@@ -175,7 +177,7 @@ func NewDetector(output chan<- ProcessEvent, opts ...DetectorOption) (*Detector,
 		return true
 	}
 
-	exePathFilterFn := func(pid int, details *ProcessExecDetails) bool {
+	exePathFilterFn := func(_ common.PIDEvent, details *ProcessExecDetails) bool {
 		for p := range c.exePathsToFilter {
 			if details.ExePath == p {
 				return true
@@ -239,10 +241,10 @@ func (d *Detector) processExecDetails(pid int) (*ProcessExecDetails, error) {
 // filter checks if the events associated with pid and details should be filtered
 // if it should, true and a message specifying the filtering reason will be returned
 // If it shouldn't, false and an empty string will be returned
-func (d *Detector) shouldFilter(pid int, details ProcessExecDetails) (bool, string) {
+func (d *Detector) shouldFilter(e common.PIDEvent, details ProcessExecDetails) (bool, string) {
 	for _, f := range d.detailsFilters {
-		if f.fn(pid, &details) {
-			d.filteredPIDs[pid] = struct{}{}
+		if f.fn(e, &details) {
+			d.filteredPIDs[e.Pid] = struct{}{}
 			return true, f.msg
 		}
 	}
@@ -261,7 +263,7 @@ func (d *Detector) procEventLoop() {
 			}
 
 			if e.Type == common.EventTypeExec {
-				filter, filterMsg := d.shouldFilter(e.Pid, *execDetails)
+				filter, filterMsg := d.shouldFilter(e, *execDetails)
 				if filter {
 					d.l.Warn("skipping process event due to details filter",
 						"pid", e.Pid,
@@ -329,7 +331,7 @@ func (d *Detector) Run(ctx context.Context) error {
 
 	// feed the PIDs from the initial scan to the first filter
 	for _, pid := range pids {
-		d.filters[0].Add(pid, common.EventTypeExec)
+		d.filters[0].Add(common.PIDEvent{Pid: pid, Type: common.EventTypeExec})
 	}
 
 	// start reading events from eBPF, this call is blocking and will return when the context is canceled

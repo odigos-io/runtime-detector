@@ -335,10 +335,10 @@ type recordingConsumer struct {
 	events []common.PIDEvent
 }
 
-func (c *recordingConsumer) Add(pid int, eventType common.EventType) {
+func (c *recordingConsumer) Add(e common.PIDEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.events = append(c.events, common.PIDEvent{Pid: pid, Type: eventType})
+	c.events = append(c.events, e)
 }
 
 func (c *recordingConsumer) Remove(pid int) {

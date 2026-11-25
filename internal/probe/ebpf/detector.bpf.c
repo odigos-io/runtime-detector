@@ -112,7 +112,7 @@ struct {
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__type(key, u32);   // the tgid as return from bpf_get_current_pid_tgid() in execve entry
-	__type(value, u8);  // value is not used
+	__type(value, u8);  // whether the env prefix was found in the environment passed to execve
 	__uint(max_entries, MAX_CONCURRENT_PIDS);
 } ongoing_exec_tgids SEC(".maps");
 
@@ -146,6 +146,9 @@ typedef enum {
 typedef struct process_event {
     u32 type;
     u32 pid;
+    // exec events only: the env prefix was found in the environment passed to execve
+    u8 env_prefix_found;
+    u8 padding[3];
 } process_event_t;
 
 // return the configured env prefix for filtering, or NULL if invalid
@@ -326,6 +329,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     }
 
     int i = 0;
+    u8 env_prefix_found = 0;
 
     // the small program variant is only used in cases where the kernel does not support bounded loops
     // and in which we must unroll the loop.
@@ -352,6 +356,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
         }
 
         if (is_env_prefix_match(&buf[0], configured_prefix)) {
+            env_prefix_found = 1;
             break;
         }
     }
@@ -379,8 +384,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     // the thread group leader.
     // this is why we are tracking by tgid here.
     // https://man7.org/linux/man-pages/man2/clone.2.html
-    u8 dummy_val = 0;
-    bpf_map_update_elem(&ongoing_exec_tgids, &tgid, &dummy_val, BPF_ANY);
+    bpf_map_update_elem(&ongoing_exec_tgids, &tgid, &env_prefix_found, BPF_ANY);
 #ifdef NO_BTF
     // if we don't have BTF, threads might have been added to these maps in the fork probe.
     // if this exec if for a non-leader thread, we might have added the old tid as a key in the maps.
@@ -393,7 +397,7 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx) {
     return 0;
 }
 
-static __always_inline int report_exec_event(void *ctx, u64 pid_tgid) {
+static __always_inline int report_exec_event(void *ctx, u64 pid_tgid, u8 env_prefix_found) {
     u32 pid =  (u32)(pid_tgid & 0xFFFFFFFF);
     u32 tgid = (u32)(pid_tgid >> 32);
     pids_in_ns_t pids = {0};
@@ -424,6 +428,7 @@ static __always_inline int report_exec_event(void *ctx, u64 pid_tgid) {
     process_event_t event = {
         .type = PROCESS_EXEC,
         .pid = pids.configured_ns_pid,
+        .env_prefix_found = env_prefix_found,
     };
 
     bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
@@ -435,7 +440,7 @@ static __always_inline int report_exec_event(void *ctx, u64 pid_tgid) {
 SEC("tracepoint/sched/sched_process_exec")
 int tracepoint__sched__sched_process_exec(struct trace_event_raw_sched_process_exec* ctx) {
     u64 pid_tgid = bpf_get_current_pid_tgid();
-    report_exec_event(ctx, pid_tgid);
+    report_exec_event(ctx, pid_tgid, 0);
     return 0;
 }
 
@@ -449,12 +454,12 @@ int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit* ctx) {
         goto cleanup;
     }
 
-    u8 *exist = bpf_map_lookup_elem(&ongoing_exec_tgids, &tgid);
-    if (exist == NULL) {
+    u8 *env_prefix_found = bpf_map_lookup_elem(&ongoing_exec_tgids, &tgid);
+    if (env_prefix_found == NULL) {
         return 0;
     }
 
-    report_exec_event(ctx, pid_tgid);
+    report_exec_event(ctx, pid_tgid, *env_prefix_found);
 
 cleanup:
     bpf_map_delete_elem(&ongoing_exec_tgids, &tgid);
