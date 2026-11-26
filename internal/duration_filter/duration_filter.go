@@ -44,9 +44,9 @@ type passthroughFilter struct {
 	output chan<- common.PIDEvent
 }
 
-func (pf *passthroughFilter) Add(pid int, eventType common.EventType) {
-	pf.logger.Debug("passthrough filter received pid", "pid", pid, "eventType", eventType.String())
-	pf.output <- common.PIDEvent{Pid: pid, Type: eventType}
+func (pf *passthroughFilter) Add(e common.PIDEvent) {
+	pf.logger.Debug("passthrough filter received pid", "pid", e.Pid, "eventType", e.Type.String())
+	pf.output <- e
 }
 
 func (pf *passthroughFilter) Remove(pid int) {
@@ -59,21 +59,21 @@ func (pf *passthroughFilter) Close() error {
 	return nil
 }
 
-func (df *durationFilter) launchProcessCountdown(pid int, eventType common.EventType) *process {
+func (df *durationFilter) launchProcessCountdown(e common.PIDEvent) *process {
 	return &process{
 		t: time.AfterFunc(df.liveDuration, func() {
-			df.logger.Debug("process has been active for the specified duration", "pid", pid)
+			df.logger.Debug("process has been active for the specified duration", "pid", e.Pid)
 			// add the pid to the consumer
-			df.output <- common.PIDEvent{Pid: pid, Type: eventType}
+			df.output <- e
 			// stop tracking the pid
 			df.mu.Lock()
-			delete(df.procs, pid)
+			delete(df.procs, e.Pid)
 			df.mu.Unlock()
 		}),
 	}
 }
 
-func (df *durationFilter) Add(pid int, eventType common.EventType) {
+func (df *durationFilter) Add(e common.PIDEvent) {
 	df.mu.Lock()
 	defer df.mu.Unlock()
 
@@ -82,15 +82,15 @@ func (df *durationFilter) Add(pid int, eventType common.EventType) {
 		return
 	}
 
-	if p, ok := df.procs[pid]; ok {
+	if p, ok := df.procs[e.Pid]; ok {
 		df.logger.Debug("pid already exists")
 		// the pid is already being tracked, we just re-scheduled the output
 		// first stop the timer and then re-launce it with the updated eventType
 		p.t.Stop()
 	}
 
-	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", pid, "eventType", eventType.String())
-	df.procs[pid] = df.launchProcessCountdown(pid, eventType)
+	df.logger.Debug("adding pid", "number of pids", len(df.procs), "pid", e.Pid, "eventType", e.Type.String())
+	df.procs[e.Pid] = df.launchProcessCountdown(e)
 }
 
 func (df *durationFilter) Remove(pid int) {

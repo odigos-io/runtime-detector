@@ -40,6 +40,32 @@ type bpf_smallOpenFilenameT struct {
 	Buf [128]uint8
 }
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	bpf_smallMapDetectorConfig                      = "detector_config"
+	bpf_smallMapEnvPrefix                           = "env_prefix"
+	bpf_smallMapEvents                              = "events"
+	bpf_smallMapExecFilesToFilter                   = "exec_files_to_filter"
+	bpf_smallMapFileOpensByPid                      = "file_opens_by_pid"
+	bpf_smallMapFilesOpenToTrack                    = "files_open_to_track"
+	bpf_smallMapOngoingExecTgids                    = "ongoing_exec_tgids"
+	bpf_smallMapTrackedPidsToNsPids                 = "tracked_pids_to_ns_pids"
+	bpf_smallMapUserPidToContainerPid               = "user_pid_to_container_pid"
+	bpf_smallProgTracepointSchedSchedProcessExec    = "tracepoint__sched__sched_process_exec"
+	bpf_smallProgTracepointSchedSchedProcessExit    = "tracepoint__sched__sched_process_exit"
+	bpf_smallProgTracepointSyscallsSysEnterExecve   = "tracepoint__syscalls__sys_enter_execve"
+	bpf_smallProgTracepointSyscallsSysEnterOpen     = "tracepoint__syscalls__sys_enter_open"
+	bpf_smallProgTracepointSyscallsSysEnterOpenat   = "tracepoint__syscalls__sys_enter_openat"
+	bpf_smallProgTracepointSyscallsSysEnterOpenat2  = "tracepoint__syscalls__sys_enter_openat2"
+	bpf_smallProgTracepointSyscallsSysExitExecve    = "tracepoint__syscalls__sys_exit_execve"
+	bpf_smallProgTracepointSyscallsSysExitOpen      = "tracepoint__syscalls__sys_exit_open"
+	bpf_smallProgTracepointSyscallsSysExitOpenat    = "tracepoint__syscalls__sys_exit_openat"
+	bpf_smallProgTracepointSyscallsSysExitOpenat2   = "tracepoint__syscalls__sys_exit_openat2"
+	bpf_smallProgTracepointBtfSchedSchedProcessFork = "tracepoint_btf__sched__sched_process_fork"
+)
+
 // loadBpf_small returns the embedded CollectionSpec for bpf_small.
 func loadBpf_small() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_Bpf_smallBytes)
@@ -60,7 +86,7 @@ func loadBpf_small() (*ebpf.CollectionSpec, error) {
 //	*bpf_smallMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBpf_smallObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadBpf_smallObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadBpf_small()
 	if err != nil {
 		return err

@@ -239,6 +239,22 @@ func TestDetector(t *testing.T) {
 				ProcessExitEvent, // parent exits
 			},
 		},
+		{
+			name:           "process overwriting its environment and forking",
+			envVarsForExec: map[string]string{"USER_ENV": "value"},
+			// the process overwrites its environment before the detector reads it from /proc
+			envVarsToAssert:  map[string]string{"USER_ENV": ""},
+			exePath:          filepath.Join(currentDir, "test/bin/environ_rewrite"),
+			args:             []string{},
+			shouldDetect:     true,
+			eventsNotInOrder: true,
+			expectedEvents: []ProcessEventType{
+				ProcessExecEvent,
+				ProcessForkEvent,
+				ProcessExitEvent,
+				ProcessExitEvent,
+			},
+		},
 	}
 
 	for _, tc := range testCases {

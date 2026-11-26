@@ -52,8 +52,9 @@ type Probe struct {
 }
 
 type processEvent struct {
-	Type common.EventType
-	Pid  uint32
+	Type           common.EventType
+	Pid            uint32
+	EnvPrefixFound bool
 }
 
 const (
@@ -437,12 +438,13 @@ func (p *Probe) Close() error {
 }
 
 func parseProcessEventInto(record *perf.Record, event *processEvent) error {
-	if len(record.RawSample) < 8 {
+	if len(record.RawSample) < 9 {
 		return errors.New("record.RawSample is too short")
 	}
 
 	event.Type = common.EventType(binary.NativeEndian.Uint32(record.RawSample[0:4]))
 	event.Pid = binary.NativeEndian.Uint32(record.RawSample[4:8])
+	event.EnvPrefixFound = record.RawSample[8] != 0
 
 	return nil
 }
@@ -532,7 +534,7 @@ LOOP:
 				p.logger.Error("lost samples", "count", record.LostSamples)
 			}
 
-			if len(record.RawSample) < 8 {
+			if len(record.RawSample) < 9 {
 				p.logger.Error("record.RawSample is too short", "length", len(record.RawSample))
 				continue
 			}
@@ -545,21 +547,21 @@ LOOP:
 
 			switch event.Type {
 			case common.EventTypeExec:
-				p.consumer.Add(int(event.Pid), common.EventTypeExec)
+				p.consumer.Add(common.PIDEvent{Pid: int(event.Pid), Type: common.EventTypeExec, EnvPrefixFound: event.EnvPrefixFound})
 			case common.EventTypeFork:
 				if !p.btfDisabled {
 					// BTF is enabled, we can trust the event is a relevant process being created
-					p.consumer.Add(int(event.Pid), common.EventTypeFork)
+					p.consumer.Add(common.PIDEvent{Pid: int(event.Pid), Type: common.EventTypeFork})
 				} else {
 					// BTF is disabled, we need to check if the PID is a process or thread
 					isProcess, err := proc.IsProcess(int(event.Pid))
 					if err == nil && isProcess {
-						p.consumer.Add(int(event.Pid), common.EventTypeFork)
+						p.consumer.Add(common.PIDEvent{Pid: int(event.Pid), Type: common.EventTypeFork})
 					}
 				}
 			case common.EventTypeFileOpen:
 				if len(p.openFilesToTrack) > 0 {
-					p.consumer.Add(int(event.Pid), common.EventTypeFileOpen)
+					p.consumer.Add(common.PIDEvent{Pid: int(event.Pid), Type: common.EventTypeFileOpen})
 				}
 			case common.EventTypeExit:
 				p.consumer.Remove(int(event.Pid))
